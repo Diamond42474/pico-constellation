@@ -1,6 +1,6 @@
 [submodule "lib/peregrine-constellation"]
 	path = lib/peregrine-constellation
 	url = https://github.com/Diamond42474/peregrine-constellation.git
-[submodule "lib/pico-nrf24"]
-	path = lib/pico-nrf24
-	url = https://github.com/AndyRids/pico-nrf24.git
+[submodule "lib/kissfft"]
+	path = lib/kissfft
+	url = https://github.com/mborgerding/kissfft.git
