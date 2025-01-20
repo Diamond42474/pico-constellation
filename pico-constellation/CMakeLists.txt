@@ -1,20 +1,22 @@
 # Include directories
 include_directories(
     include
+    include/drivers
 )
 
 # Source files
 add_executable(${PROJECT_NAME}
     src/main.c
+
+    # Drivers
+    src/drivers/mcp4725.c
 )
 
 # Link libraries
 target_link_libraries(${PROJECT_NAME}
     # Standard
     pico_stdlib
-
-    # Device Drivers
-    nrf24_driver
+    hardware_i2c
 
     # Constellation
     peregrine-constellation
