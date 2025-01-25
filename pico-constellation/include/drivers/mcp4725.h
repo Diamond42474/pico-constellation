@@ -22,6 +22,7 @@ int mcp4725_init(mcp4725_handle_t *handle, i2c_inst_t *i2c, uint8_t i2c_address)
 int mcp4725_write_eeprom(mcp4725_handle_t const *handle, uint16_t dac_value, uint8_t power_down_mode);
 int mcp4725_read(mcp4725_handle_t const *handle, uint16_t *dac_value, uint8_t *power_down_mode, bool *eeprom_ready);
 int mcp4725_set_voltage(mcp4725_handle_t const *handle, float voltage, uint8_t power_down_mode);
+int mcp4725_set_voltage_raw(mcp4725_handle_t const *handle, uint16_t voltage, uint8_t power_down_mode);
 int mcp4725_get_voltage(mcp4725_handle_t const *handle, float *voltage);
 int mcp4725_deinit(mcp4725_handle_t const *handle);
 

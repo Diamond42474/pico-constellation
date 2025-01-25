@@ -62,6 +62,19 @@ int mcp4725_set_voltage(mcp4725_handle_t const *handle, float voltage, uint8_t p
     return ret < 0 ? -2 : 0;
 }
 
+int mcp4725_set_voltage_raw(mcp4725_handle_t const *handle, uint16_t voltage, uint8_t power_down_mode)
+{
+    if (!handle || voltage > 0xFFF) return -1;
+
+    uint8_t buffer[3];
+    buffer[0] = MCP4725_FAST_MODE | (power_down_mode << 4);
+    buffer[1] = (voltage >> 4) & 0xFF;
+    buffer[2] = (voltage & 0x0F) << 4;
+
+    int ret = i2c_write_timeout_us(handle->i2c, handle->i2c_address, buffer, 3, false, MCP4725_I2C_TIMEOUT);
+    return ret < 0 ? -2 : 0;
+}
+
 int mcp4725_get_voltage(mcp4725_handle_t const *handle, float *voltage) {
     if (!handle || !voltage) return -1;
 

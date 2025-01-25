@@ -9,6 +9,7 @@ add_executable(${PROJECT_NAME}
     src/main.c
 
     # Drivers
+    src/drivers/ad9833.c
     src/drivers/mcp4725.c
 )
 
@@ -20,6 +21,9 @@ target_link_libraries(${PROJECT_NAME}
 
     # Constellation
     peregrine-constellation
+
+    # Hardware drivers
+    fhdm-ad9833-pico
 )
 
 # Enable USB output
