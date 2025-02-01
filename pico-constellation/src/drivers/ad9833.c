@@ -19,6 +19,8 @@ int ad9833_init(void)
     // Initialize the AD9833 driver
     fhdm_ad9833_pico_new(&ad9833);
 
+    ad9833.start(&ad9833);
+
     initialized = true;
 
 failed:
@@ -78,6 +80,7 @@ int ad9833_set_frequency_hz(float frequency)
         if (ad9833_init())
         {
             ret = -1;
+            printf("Failed to initialize AD9833\n");
             goto failed;
         }
     }
