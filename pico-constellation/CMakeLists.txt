@@ -10,6 +10,7 @@ add_executable(${PROJECT_NAME}
 
     # Drivers
     src/drivers/ad9833.c
+    src/drivers/adc_fft.c
     src/drivers/mcp4725.c
 )
 
@@ -18,13 +19,25 @@ target_link_libraries(${PROJECT_NAME}
     # Standard
     pico_stdlib
     hardware_i2c
+    hardware_adc
+    hardware_dma
 
     # Constellation
     peregrine-constellation
 
     # Hardware drivers
     fhdm-ad9833-pico
+
+    # Math libraries
+    kissfft
 )
+
+# add_definitions(-DFIXED_POINT=16 -Dkiss_fft_scalar=uint16_t)
+# add_compile_definitions(${PROJECT_NAME} 
+# PRIVATE 
+#     KISSFFT_DATATYPE=int16_t 
+#     FIXED_POINT=16 
+# )
 
 # Enable USB output
 pico_enable_stdio_usb(${PROJECT_NAME} 1)
