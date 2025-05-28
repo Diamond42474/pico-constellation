@@ -6,4 +6,4 @@
 	url = https://github.com/mborgerding/kissfft.git
 [submodule "lib/ad9833-pico"]
 	path = lib/ad9833-pico
-	url = https://github.com/fhdm-dev/ad9833-pico.git
+	url = https://github.com/Diamond42474/ad9833-pico.git
