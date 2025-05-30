@@ -30,6 +30,9 @@ target_link_libraries(${PROJECT_NAME}
 
     # Math libraries
     kissfft
+
+    # Utility libraries
+    c-logger
 )
 
 # add_definitions(-DFIXED_POINT=16 -Dkiss_fft_scalar=uint16_t)

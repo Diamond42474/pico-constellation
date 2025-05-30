@@ -10,3 +10,7 @@ set(KISSFFT_TOOLS OFF)
 set(KISSFFT_DATATYPE int16_t)
 set(FIXED_POINT 16)
 add_subdirectory(kissfft)
+
+# Add C-Logger library
+set(C_LOGGER_ENABLE_TESTS OFF)
+add_subdirectory(c-logger)
