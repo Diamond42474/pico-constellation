@@ -1,8 +1,9 @@
 #include "ad9833.h"
 
+#include <stdio.h>
 #include "fhdm-ad9833-pico.h"
 #include "pico/stdlib.h"
-#include <stdio.h>
+#include "c-logger.h"
 
 static bool initialized = false;
 static struct fhdm_ad9833 ad9833;
@@ -10,6 +11,7 @@ static struct fhdm_ad9833 ad9833;
 int ad9833_init(void)
 {
     int ret = 0;
+    LOG_INFO("Initializing AD9833");
 
     if (initialized)
     {
@@ -30,6 +32,7 @@ failed:
 int ad9833_deinit(void)
 {
     int ret = 0;
+    LOG_INFO("Deinitializing AD9833");
 
 failed:
     return ret;
@@ -38,8 +41,9 @@ failed:
 int ad9833_set_mode(ad9833_mode_t mode)
 {
     int ret = 0;
+    LOG_DEBUG("Setting AD9833 mode to %d", mode);
 
-        if (!initialized)
+    if (!initialized)
     {
         if (ad9833_init())
         {
@@ -51,15 +55,19 @@ int ad9833_set_mode(ad9833_mode_t mode)
     switch (mode)
     {
     case AD9833_MODE_SINE:
+        LOG_INFO("Setting AD9833 mode to SINE");
         ad9833.set_mode(&ad9833, FHDM_AD9833_MODE_SINE);
         break;
     case AD9833_MODE_TRIANGLE:
+        LOG_INFO("Setting AD9833 mode to TRIANGLE");
         ad9833.set_mode(&ad9833, FHDM_AD9833_MODE_TRIANGLE);
         break;
     case AD9833_MODE_SQUARE:
+        LOG_INFO("Setting AD9833 mode to SQUARE");
         ad9833.set_mode(&ad9833, FHDM_AD9833_MODE_SQUARE);
         break;
     case AD9833_MODE_SLEEP:
+        LOG_INFO("Setting AD9833 mode to SLEEP");
         ad9833.set_mode(&ad9833, FHDM_AD9833_MODE_SLEEP);
         break;
     default:
@@ -74,6 +82,8 @@ failed:
 int ad9833_set_frequency_hz(float frequency)
 {
     int ret = 0;
+
+    LOG_DEBUG("Setting AD9833 frequency to %.2f Hz", frequency);
 
     if (!initialized)
     {

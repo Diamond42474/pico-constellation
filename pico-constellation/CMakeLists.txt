@@ -1,12 +1,16 @@
 # Include directories
 include_directories(
     include
+    include/communication
     include/drivers
 )
 
 # Source files
 add_executable(${PROJECT_NAME}
     src/main.c
+
+    # Communications
+    src/communication/communication_interface.c
 
     # Drivers
     src/drivers/ad9833.c
