@@ -7,8 +7,8 @@
 #include <stdio.h>
 
 #define ADC_CHANNEL 0
-#define SAMPLE_RATE 64000
-#define FFT_SIZE 64
+#define SAMPLE_RATE 48000
+#define FFT_SIZE 128
 #define FIXED_POINT_SCALE (1 << 16) // Scale factor for 16-bit fixed-point (2^12 for range)
 
 static uint16_t sample_buffer[FFT_SIZE];
