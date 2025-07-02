@@ -15,7 +15,6 @@ add_executable(${PROJECT_NAME}
     # Drivers
     src/drivers/ad9833.c
     src/drivers/adc_fft.c
-    src/drivers/mcp4725.c
 )
 
 # Link libraries
