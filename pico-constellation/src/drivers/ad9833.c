@@ -41,7 +41,7 @@ failed:
 int ad9833_set_mode(ad9833_mode_t mode)
 {
     int ret = 0;
-    LOG_DEBUG("Setting AD9833 mode to %d", mode);
+    //LOG_DEBUG("Setting AD9833 mode to %d", mode);
 
     if (!initialized)
     {
