@@ -3,6 +3,7 @@ include_directories(
     include
     include/communication
     include/drivers
+    include/utils
 )
 
 # Source files
@@ -15,6 +16,10 @@ add_executable(${PROJECT_NAME}
     # Drivers
     src/drivers/ad9833.c
     src/drivers/adc_fft.c
+    src/drivers/adc_hal.c
+
+    # Utils
+    src/utils/goertzel.c
 )
 
 # Link libraries
