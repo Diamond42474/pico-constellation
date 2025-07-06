@@ -446,10 +446,9 @@ static int _calculate_window_offset(void)
 
     if (max_power_diff <= 0)
     {
-        LOG_WARN("No significant power difference found, using default offset 0");
         return 0; // No significant power difference found, use default offset
     }
 
-    LOG_INFO("Best offset found: %d with power difference: %d", best_offset, max_power_diff);
+    LOG_DEBUG("Best offset found: %d with power difference: %d", best_offset, max_power_diff);
     return best_offset; // Return the best offset found
 }
