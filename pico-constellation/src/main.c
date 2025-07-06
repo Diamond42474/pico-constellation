@@ -8,7 +8,7 @@
 #include "ad9833.h"
 #include "fsk_decoder.h"
 
-#define POWER_THRESHOLD 100000.0f // Power threshold for detecting signals
+#define POWER_THRESHOLD 1000000.0f // Power threshold for detecting signals
 #define SAMPLE_RATE 2400          // 2400 Hz sample rate
 #define BAUD_RATE 8               // bits per second
 

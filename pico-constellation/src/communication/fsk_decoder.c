@@ -1,10 +1,14 @@
 #include "fsk_decoder.h"
 
+#include <stdbool.h>
+#include <string.h>
+#include <stdlib.h>
+#include <math.h>
 #include "goertzel.h"
 #include "c-logger.h"
 #include "adc_hal.h"
 
-#include <stdbool.h>
+#define BUFFER_SIZE_MULTIPLYER 2 // Buffer size multiplier for ADC samples
 
 static void (*bit_callback)(int bit) = NULL;
 static int baud_rate = 8;                 // Default baud rate
@@ -16,11 +20,13 @@ static bool initialized = false;
 static bool running = false;
 static bool adc_samples_ready = false;
 
-static uint16_t adc_samples[2400]; // Buffer for ADC samples, size can be adjusted
-static size_t adc_sample_size = 0; // Size of the ADC samples
+static uint16_t *adc_samples = NULL;   // Buffer for ADC samples, size can be adjusted
+static int adc_sample_buffer_size = 0; // Buffer size for ADC samples
+static int adc_sample_size = 0;        // Size of the ADC samples
 
 static void adc_sample_callback(size_t size);
 static void _process_samples(const uint16_t *samples, size_t num_samples);
+static int _calculate_window_offset(void);
 
 int fsk_decoder_init(void)
 {
@@ -207,13 +213,39 @@ int fsk_decoder_start(void)
         goto failed;
     }
 
-    int sample_size = sample_rate / baud_rate;
+    adc_sample_size = sample_rate / baud_rate;
 
-    if (adc_hal_set_sample_size(sample_size))
+    if (adc_hal_set_sample_size(adc_sample_size))
     {
         LOG_ERROR("Failed to set ADC sample size: %d", baud_rate);
         ret = -1;
         goto failed;
+    }
+
+    int buffer_size = adc_sample_size * BUFFER_SIZE_MULTIPLYER; // Gives some extra space for bit alignment
+
+    if (adc_sample_buffer_size == 0) // Allocate buffer if not already allocated
+    {
+        adc_samples = calloc(buffer_size, sizeof(uint16_t));
+        if (adc_samples == NULL)
+        {
+            LOG_ERROR("Failed to allocate memory for ADC sample buffer");
+            ret = -1;
+            goto failed;
+        }
+        adc_sample_buffer_size = buffer_size;
+    }
+    else if (adc_sample_buffer_size < buffer_size) // Resize the buffer if it's smaller than required
+    {
+        free(adc_samples);
+        adc_samples = calloc(buffer_size, sizeof(uint16_t));
+        if (adc_samples == NULL)
+        {
+            LOG_ERROR("Failed to reallocate memory for ADC sample buffer");
+            ret = -1;
+            goto failed;
+        }
+        adc_sample_buffer_size = buffer_size;
     }
 
     // Start the ADC sampling
@@ -263,7 +295,16 @@ failed:
     return ret;
 }
 
-int fsk_decoder_is_running(void);
+int fsk_decoder_is_running(void)
+{
+    if (!initialized)
+    {
+        LOG_WARN("FSK decoder not initialized");
+        return 0; // Not running
+    }
+
+    return running ? 1 : 0; // Return 1 if running, 0 if not
+}
 
 int fsk_decoder_process(void)
 {
@@ -290,17 +331,27 @@ int fsk_decoder_process(void)
         return 0; // No samples to process
     }
 
-    adc_samples_ready = false; // Reset the flag
+    // Move old samples to the beginning of the buffer
+    memcpy(adc_samples, adc_samples + adc_sample_size, (adc_sample_buffer_size - adc_sample_size) * sizeof(uint16_t));
 
-    if (adc_hal_get_samples(adc_samples, sizeof(adc_samples) / sizeof(adc_samples[0]), &adc_sample_size) < 0)
+    adc_samples_ready = false; // Reset the flag
+    int samples_read = 0;
+    if (adc_hal_get_samples(adc_samples + (adc_sample_buffer_size - adc_sample_size), adc_sample_size, &samples_read)) // Read new samples into the end of the buffer
     {
         LOG_ERROR("Failed to get ADC samples");
         ret = -1;
         goto failed;
     }
+    if (samples_read != adc_sample_size)
+    {
+        LOG_WARN("Expected %d samples, but got %d", adc_sample_size, samples_read);
+        ret = -1;
+        goto failed;
+    }
 
     LOG_DEBUG("Processing %d ADC samples", adc_sample_size);
-    _process_samples(adc_samples, adc_sample_size);
+    int window_offset = _calculate_window_offset();
+    _process_samples(adc_samples + window_offset, adc_sample_size);
 
 failed:
     return ret;
@@ -357,5 +408,48 @@ static void _process_samples(const uint16_t *samples, size_t num_samples)
         return; // No callback to handle detected bits
     }
 
-    bit_callback(bit);
+    bit_callback(bit); // Call the callback with the detected bit
+}
+
+static int _calculate_window_offset(void)
+{
+    int sample_size = adc_sample_size;
+    const int max_offset_range = sample_size / 4;
+
+    // Calculate the offset based off of the offset that gives the greatest power difference
+    int max_power_diff = 0;
+    int best_offset = 0;
+    for (int offset = 0; offset < max_offset_range; offset++)
+    {
+        float power_0 = 0.0f;
+        float power_1 = 0.0f;
+
+        if (goertzel_compute_power(adc_samples + offset, sample_size, freq_0, sample_rate, &power_0) < 0)
+        {
+            LOG_ERROR("Failed to compute power for frequency %f at offset %d", freq_0, offset);
+            continue;
+        }
+
+        if (goertzel_compute_power(adc_samples + offset, sample_size, freq_1, sample_rate, &power_1) < 0)
+        {
+            LOG_ERROR("Failed to compute power for frequency %f at offset %d", freq_1, offset);
+            continue;
+        }
+
+        float power_diff = fabsf(power_1 - power_0);
+        if (power_diff > max_power_diff)
+        {
+            max_power_diff = power_diff;
+            best_offset = offset;
+        }
+    }
+
+    if (max_power_diff <= 0)
+    {
+        LOG_WARN("No significant power difference found, using default offset 0");
+        return 0; // No significant power difference found, use default offset
+    }
+
+    LOG_INFO("Best offset found: %d with power difference: %d", best_offset, max_power_diff);
+    return best_offset; // Return the best offset found
 }
