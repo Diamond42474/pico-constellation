@@ -12,6 +12,7 @@ add_executable(${PROJECT_NAME}
 
     # Communications
     src/communication/communication_interface.c
+    src/communication/fsk_decoder.c
 
     # Drivers
     src/drivers/ad9833.c
