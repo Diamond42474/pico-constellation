@@ -213,9 +213,17 @@ int adc_hal_get_samples(uint16_t *buffer, size_t max_size, int *num_samples)
 
     int to_copy = available < (int)max_size ? available : (int)max_size;
 
-    for (int i = 0; i < to_copy; ++i)
+    int first_chunk = buffer_capacity - read_index;
+    if (first_chunk >= to_copy)
     {
-        buffer[i] = circular_buffer[(read_index + i) % buffer_capacity];
+        // Data is contiguous; single memcpy
+        memcpy(buffer, &circular_buffer[read_index], to_copy * sizeof(uint16_t));
+    }
+    else
+    {
+        // Data wraps around; split into two memcpy calls
+        memcpy(buffer, &circular_buffer[read_index], first_chunk * sizeof(uint16_t));
+        memcpy(buffer + first_chunk, &circular_buffer[0], (to_copy - first_chunk) * sizeof(uint16_t));
     }
 
     read_index = (read_index + to_copy) % buffer_capacity;

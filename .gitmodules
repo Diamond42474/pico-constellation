@@ -1,9 +1,6 @@
 [submodule "lib/peregrine-constellation"]
 	path = lib/peregrine-constellation
 	url = https://github.com/Diamond42474/peregrine-constellation.git
-[submodule "lib/kissfft"]
-	path = lib/kissfft
-	url = https://github.com/mborgerding/kissfft.git
 [submodule "lib/ad9833-pico"]
 	path = lib/ad9833-pico
 	url = https://github.com/Diamond42474/ad9833-pico.git

@@ -12,15 +12,12 @@ add_executable(${PROJECT_NAME}
 
     # Communications
     src/communication/communication_interface.c
-    src/communication/fsk_decoder.c
 
     # Drivers
     src/drivers/ad9833.c
-    src/drivers/adc_fft.c
     src/drivers/adc_hal.c
 
     # Utils
-    src/utils/goertzel.c
 )
 
 # Link libraries
@@ -36,9 +33,6 @@ target_link_libraries(${PROJECT_NAME}
 
     # Hardware drivers
     fhdm-ad9833-pico
-
-    # Math libraries
-    kissfft
 
     # Utility libraries
     c-logger
