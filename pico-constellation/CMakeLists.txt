@@ -18,6 +18,7 @@ add_executable(${PROJECT_NAME}
     src/drivers/adc_hal.c
 
     # Utils
+    src/utils/HAL_time.c
 )
 
 # Link libraries
