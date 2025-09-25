@@ -16,7 +16,7 @@
 #define F1 2200
 #define F0 1100
 #define SAMPLE_RATE 2400 // Sample rate for ADC
-#define POWER_THRESHOLD 1000000.0f // Power threshold for detecting bits
+#define POWER_THRESHOLD 100000000.0f // Power threshold for detecting bits
 
 uint8_t encoded_data[256];
 size_t encoded_length = 0;
@@ -146,8 +146,6 @@ int main()
     }
 
     // Prepend preamble byte
-    // encoded_data[0] = 0xFF; // Preamble
-    // encoded_length += 1;
     encoded_data[0] = 0xAA; // Preamble
     encoded_length += 1;
 
