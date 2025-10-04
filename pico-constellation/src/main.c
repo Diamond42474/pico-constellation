@@ -11,7 +11,6 @@
 #include "cobs_encoder.h"
 
 #include "adc_hal.h"
-#include "mario_theme.h"
 
 #define BAUD_RATE 8 // Baud rate for FSK modulation
 #define F1 2200
