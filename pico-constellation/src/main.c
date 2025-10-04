@@ -11,12 +11,14 @@
 #include "cobs_encoder.h"
 
 #include "adc_hal.h"
+#include "mario_theme.h"
 
 #define BAUD_RATE 8 // Baud rate for FSK modulation
 #define F1 2200
 #define F0 1100
 #define SAMPLE_RATE 2400 // Sample rate for ADC
 #define POWER_THRESHOLD 100000000.0f // Power threshold for detecting bits
+#define PTT_PIN 15 // GP15 for PTT control
 
 uint8_t encoded_data[256];
 size_t encoded_length = 0;
@@ -39,8 +41,10 @@ void send_handler(void)
     if (!transmitting)
     {
         //ad9833_set_frequency_hz(0); // Stop output if not transmitting
+        gpio_put(PTT_PIN, 0);
         return;
     }
+    gpio_put(PTT_PIN, 1);
 
     if (HAL_timer_done(&transmitting_timer))
     {
@@ -94,6 +98,13 @@ int main()
     fsk_decoder.adc_set_sample_rate = adc_hal_set_sample_rate;
     fsk_decoder.adc_set_sample_size = adc_hal_set_sample_size;
     fsk_decoder.adc_get_samples = adc_hal_get_samples;
+
+    // Initialize GPPTT_PIN output and set it low
+    gpio_init(PTT_PIN);
+    gpio_set_dir(PTT_PIN, GPIO_OUT);
+    // set internal pull down resistor
+    gpio_pull_down(PTT_PIN);
+    gpio_put(PTT_PIN, 0);
 
     if (fsk_decoder_init(&fsk_decoder))
     {
