@@ -5,26 +5,23 @@
 #include "ad9833.h"
 #include "HAL_time.h"
 
-#include "fsk_decoder.h"
-#include "byte_assembler.h"
-#include "cobs_decoder.h"
-#include "cobs_encoder.h"
-
+#include "encoder.h"
 #include "adc_hal.h"
+#include "fsk_utils.h"
 
-#define BAUD_RATE 8 // Baud rate for FSK modulation
+#define BAUD_RATE 128 // Baud rate for FSK modulation
 #define F1 2200
 #define F0 1100
-#define SAMPLE_RATE 2400 // Sample rate for ADC
 #define POWER_THRESHOLD 100000000.0f // Power threshold for detecting bits
-#define PTT_PIN 15 // GP15 for PTT control
+#define PTT_PIN 15                   // GP15 for PTT control
 
-uint8_t encoded_data[256];
-size_t encoded_length = 0;
+static encoder_handle_t encoder = {0};
+HAL_timer_t transmitting_timer;
+HAL_timer_t PTT_delay_timer;
 
 void data_callback(const uint8_t *data, size_t len)
 {
-    printf("Decoded Data: ");
+    LOG_INFO("Decoded Data:");
     for (size_t i = 0; i < len; i++)
     {
         printf("%02X ", data[i]);
@@ -32,41 +29,32 @@ void data_callback(const uint8_t *data, size_t len)
     printf("\n");
 }
 
-HAL_timer_t transmitting_timer;
-int bit_index = 0;
-bool transmitting = false;
 void send_handler(void)
 {
-    if (!transmitting)
+    // gpio_put(PTT_PIN, 1);
+
+    if (!HAL_timer_done(&transmitting_timer))
     {
-        //ad9833_set_frequency_hz(0); // Stop output if not transmitting
-        gpio_put(PTT_PIN, 0);
         return;
     }
-    gpio_put(PTT_PIN, 1);
+    HAL_timer_reset(&transmitting_timer);
 
-    if (HAL_timer_done(&transmitting_timer))
+    bool bit;
+    encoder_read(&encoder, &bit);
+    if (bit)
     {
-        //LOG_INFO("Time over: %llu ms", HAL_get_current_time_ms() - (transmitting_timer.start_time / 1000));
-        HAL_timer_reset(&transmitting_timer);
-        int total_bits = encoded_length * 8;
-        if (bit_index >= total_bits)
-        {
-            ad9833_set_frequency_hz(0); // Stop output
-            transmitting = false;
-            LOG_INFO("Transmission complete");
-            return;
-        }
+        ad9833_set_frequency_hz(F1);
+    }
+    else
+    {
+        ad9833_set_frequency_hz(F0);
+    }
 
-        int byte_index = bit_index / 8;
-        int bit_in_byte = 7 - (bit_index % 8); // MSB first
-        uint8_t current_byte = encoded_data[byte_index];
-        bool current_bit = (current_byte >> bit_in_byte) & 0x01;
-
-        // LOG_INFO("Sending bit %d: %d (Byte: %02X, Bit: %d)", bit_index, current_bit, current_byte, bit_in_byte);
-
-        ad9833_set_frequency_hz(current_bit ? F1 : F0);
-        bit_index++;
+    if (!encoder_data_available(&encoder))
+    {
+        ad9833_set_frequency_hz(0); // Stop transmission
+        gpio_put(PTT_PIN, 0);
+        return;
     }
 }
 
@@ -85,131 +73,62 @@ int main()
         goto failed;
     }
 
-    fsk_decoder_handle_t fsk_decoder;
-    fsk_decoder.baud_rate = BAUD_RATE;
-    fsk_decoder.sample_rate = SAMPLE_RATE;           // Sample rate of 2400 Hz
-    fsk_decoder.power_threshold = POWER_THRESHOLD; // Power threshold for detecting
-    fsk_decoder.bit_callback = byte_assembler_bit_callback;
-    fsk_decoder.adc_init = adc_hal_init;
-    fsk_decoder.adc_start = adc_hal_start;
-    fsk_decoder.adc_stop = adc_hal_stop;
-    fsk_decoder.adc_set_callback = adc_hal_set_callback;
-    fsk_decoder.adc_set_sample_rate = adc_hal_set_sample_rate;
-    fsk_decoder.adc_set_sample_size = adc_hal_set_sample_size;
-    fsk_decoder.adc_get_samples = adc_hal_get_samples;
+    fsk_timing_t fsk_timing = fsk_calculate_timing(BAUD_RATE, F1, F0);
+    LOG_INFO("FSK Timing: Sample Rate = %d Hz, Samples per Bit = %d", fsk_timing.sample_rate, fsk_timing.samples_per_bit);
+
+    encoder_init(&encoder);
+    encoder_set_type(&encoder, ENCODER_TYPE_COBS);
+    encoder_set_input_size(&encoder, 1024);
+    encoder_set_output_size(&encoder, 1024);
+
+    LOG_INFO("Initializing Encoder...");
+    while (encoder_busy(&encoder))
+    {
+        encoder_task(&encoder);
+    }
 
     // Initialize GPPTT_PIN output and set it low
     gpio_init(PTT_PIN);
     gpio_set_dir(PTT_PIN, GPIO_OUT);
     // set internal pull down resistor
     gpio_pull_down(PTT_PIN);
-    gpio_put(PTT_PIN, 0);
+    gpio_put(PTT_PIN, 1);
 
-    if (fsk_decoder_init(&fsk_decoder))
+    char test_data[] = "Hello, this is a test message from Pico Constellation!";
+    encoder_write(&encoder, (unsigned char *)test_data, sizeof(test_data));
+    encoder_flush(&encoder);
+    while (encoder_busy(&encoder))
     {
-        LOG_FATAL("Failed to initialize FSK decoder");
-        ret = -1;
-        goto failed;
+        encoder_task(&encoder);
     }
-
-    fsk_decoder_set_baud_rate(&fsk_decoder, BAUD_RATE);
-    fsk_decoder_set_sample_rate(&fsk_decoder, SAMPLE_RATE);
-    fsk_decoder_set_frequencies(&fsk_decoder, F0, F1);
-    fsk_decoder_set_power_threshold(&fsk_decoder, POWER_THRESHOLD);
-
-    if (byte_assembler_init())
-    {
-        LOG_ERROR("Failed to initialize byte assembler");
-        ret = -1;
-        goto failed;
-    }
-
-    if (byte_assembler_set_byte_callback(cobs_decoder_input))
-    {
-        LOG_ERROR("Failed to set byte assembler callback");
-        ret = -1;
-        goto failed;
-    }
-
-    if (cobs_decoder_init())
-    {
-        LOG_ERROR("Failed to initialize COBS decoder");
-        ret = -1;
-        goto failed;
-    }
-
-    if (cobs_decoder_set_data_callback(data_callback))
-    {
-        LOG_ERROR("Failed to set COBS decoder data callback");
-        ret = -1;
-        goto failed;
-    }
-
-    char test_data[] = "H";
-    size_t test_data_len = sizeof(test_data) - 1; // Exclude null terminator
-    encoded_length = cobs_encode((const uint8_t *)test_data, test_data_len, encoded_data + 1, sizeof(encoded_data) - 1);
-    if (encoded_length < 0)
-    {
-        LOG_ERROR("Failed to encode data with COBS");
-        ret = -1;
-        goto failed;
-    }
-
-    // Prepend preamble byte
-    encoded_data[0] = 0xAA; // Preamble
-    encoded_length += 1;
-
-    LOG_INFO("Encoded Data: ");
-    for (size_t i = 0; i < encoded_length; i++)
-    {
-        printf("%02X ", encoded_data[i]);
-    }
-    printf("\n");
-    printf("Original data: %02X\n", test_data[0]);
 
     ad9833_set_mode(AD9833_MODE_SINE);
 
-    if (fsk_decoder_start(&fsk_decoder))
-    {
-        LOG_FATAL("Failed to start FSK decoder");
-        ret = -1;
-        goto failed;
-    }
-
-    transmitting = true;
-    bool flag = false;
-
     HAL_timer_start(&transmitting_timer, (1000 / BAUD_RATE) * ONE_MILLISECOND); // Start timer for bit duration
     HAL_timer_t intermittent_timer;
+    HAL_timer_start(&intermittent_timer, 3 * ONE_SECOND); // Start timer for intermittent sending
+    HAL_timer_start(&PTT_delay_timer, 500 * ONE_MILLISECOND); // Start timer for PTT delay
     while (true)
     {
+        encoder_task(&encoder);
 
-        send_handler();
-        if (fsk_decoder_process(&fsk_decoder))
+        if (encoder_data_available(&encoder) || encoder_busy(&encoder))
         {
-            LOG_ERROR("Failed to process FSK decoder");
-            ret = -1;
-            goto failed;
-        }
-
-        if (!transmitting)
-        {
-            if (!flag)
+            if (HAL_timer_done(&PTT_delay_timer))
             {
-                LOG_INFO("Transmission complete, waiting for 3 seconds...");
-                HAL_timer_start(&intermittent_timer, ONE_SECOND * 3); // Start intermittent timer
-                flag = true;
+                send_handler();
             }
-
-            // Non-blocking delay for 3000 ms
+            HAL_timer_reset(&intermittent_timer);
+        }
+        else
+        {
+            gpio_put(PTT_PIN, 0);
             if (HAL_timer_done(&intermittent_timer))
             {
-                LOG_INFO("Resuming transmission...");
-                //byte_assembler_reset();
-                //cobs_decoder_reset();
-                bit_index = 0; // Reset bit index for new transmission
-                transmitting = true;
-                flag = false;
+                encoder_write(&encoder, (unsigned char *)test_data, sizeof(test_data));
+                encoder_flush(&encoder);
+                HAL_timer_reset(&PTT_delay_timer);
+                gpio_put(PTT_PIN, 1);
             }
         }
     }
