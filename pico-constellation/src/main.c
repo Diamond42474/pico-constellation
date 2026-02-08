@@ -5,9 +5,9 @@
 #include "ad9833.h"
 #include "HAL_time.h"
 
-#include "encoder.h"
+#include "encoding/encoder.h"
 #include "adc_hal.h"
-#include "fsk_utils.h"
+#include "utils/fsk_utils.h"
 
 #define BAUD_RATE 128 // Baud rate for FSK modulation
 #define F1 2200
