@@ -94,7 +94,7 @@ int main()
     gpio_pull_down(PTT_PIN);
     gpio_put(PTT_PIN, 1);
 
-    char test_data[] = "Hello, this is a test message from Pico Constellation!";
+    char test_data[] = "Hello, Pico Constellation!";
     encoder_write(&encoder, (unsigned char *)test_data, sizeof(test_data));
     encoder_flush(&encoder);
     while (encoder_busy(&encoder))
