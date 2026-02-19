@@ -9,9 +9,9 @@
 #include "adc_hal.h"
 #include "utils/fsk_utils.h"
 
-#define BAUD_RATE 128 // Baud rate for FSK modulation
-#define F1 2200
-#define F0 1100
+#define BAUD_RATE 32 // Baud rate for FSK modulation
+#define F1 1100
+#define F0 2200
 #define POWER_THRESHOLD 100000000.0f // Power threshold for detecting bits
 #define PTT_PIN 15                   // GP15 for PTT control
 
@@ -73,8 +73,10 @@ int main()
         goto failed;
     }
 
-    fsk_timing_t fsk_timing = fsk_calculate_timing(BAUD_RATE, F1, F0);
-    LOG_INFO("FSK Timing: Sample Rate = %d Hz, Samples per Bit = %d", fsk_timing.sample_rate, fsk_timing.samples_per_bit);
+    double sample_rate = calculate_sample_rate(F1, F0, BAUD_RATE);
+    size_t samples_per_bit = (size_t)(sample_rate / BAUD_RATE);
+    LOG_INFO("FSK Timing: Sample Rate = %f Hz", sample_rate);
+    LOG_INFO("FSK Timing: Samples per Bit = %d", samples_per_bit);
 
     encoder_init(&encoder);
     encoder_set_type(&encoder, ENCODER_TYPE_COBS);
@@ -94,7 +96,9 @@ int main()
     gpio_pull_down(PTT_PIN);
     gpio_put(PTT_PIN, 1);
 
-    char test_data[] = "Hello, Pico Constellation!";
+    char test_data[] = "  Hello!";
+    test_data[0] = 0xAB; // Preamble byte 1
+    test_data[1] = 0xBA; // Preamble byte 2
     encoder_write(&encoder, (unsigned char *)test_data, sizeof(test_data));
     encoder_flush(&encoder);
     while (encoder_busy(&encoder))
