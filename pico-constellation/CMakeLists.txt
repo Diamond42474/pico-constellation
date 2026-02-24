@@ -9,6 +9,7 @@ include_directories(
 # Source files
 add_executable(${PROJECT_NAME}
     src/transmitter.c
+    # src/receiver.c
 
     # Communications
     src/communication/communication_interface.c

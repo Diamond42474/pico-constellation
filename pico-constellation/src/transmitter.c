@@ -9,10 +9,10 @@
 #include "adc_hal.h"
 #include "utils/fsk_utils.h"
 
-#define BAUD_RATE 32 // Baud rate for FSK modulation
-#define F1 1100
-#define F0 2200
-#define POWER_THRESHOLD 100000000.0f // Power threshold for detecting bits
+#define BAUD_RATE 8 // Baud rate for FSK modulation
+#define F1 2200
+#define F0 2400
+#define POWER_THRESHOLD 10000000000.0f // Power threshold for detecting bits
 #define PTT_PIN 15                   // GP15 for PTT control
 
 static encoder_handle_t encoder = {0};
@@ -110,7 +110,7 @@ int main()
 
     HAL_timer_start(&transmitting_timer, (1000 / BAUD_RATE) * ONE_MILLISECOND); // Start timer for bit duration
     HAL_timer_t intermittent_timer;
-    HAL_timer_start(&intermittent_timer, 3 * ONE_SECOND); // Start timer for intermittent sending
+    HAL_timer_start(&intermittent_timer, 1 * ONE_SECOND); // Start timer for intermittent sending
     HAL_timer_start(&PTT_delay_timer, 500 * ONE_MILLISECOND); // Start timer for PTT delay
     while (true)
     {

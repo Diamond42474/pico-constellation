@@ -12,10 +12,10 @@
 #include "decoding/fsk_decoder.h"
 #include "decoding/byte_assembler.h"
 
-#define BAUD_RATE 32 // Baud rate for FSK modulation
-#define F1 1100
-#define F0 2200
-#define POWER_THRESHOLD 100000000.0f // Power threshold for detecting bits
+#define BAUD_RATE 8 // Baud rate for FSK modulation
+#define F1 2200
+#define F0 2400
+#define POWER_THRESHOLD 1000000000.0f // Power threshold for detecting bits
 
 static bool sample_ready = false;
 static size_t available_samples = 0;
