@@ -6,10 +6,13 @@ include_directories(
     include/utils
 )
 
+# Complier optimize for speed
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Ofast")
+
 # Source files
 add_executable(${PROJECT_NAME}
-    src/transmitter.c
-    # src/receiver.c
+    #src/transmitter.c
+    src/receiver.c
 
     # Communications
     src/communication/communication_interface.c
