@@ -9,10 +9,9 @@
 #include "adc_hal.h"
 #include "utils/fsk_utils.h"
 
-#define BAUD_RATE 64 // Baud rate for FSK modulation
+#define BAUD_RATE 250 // Baud rate for FSK modulation
 #define F1 2200
 #define F0 1200
-#define POWER_THRESHOLD 1E9f // Power threshold for detecting bits
 #define PTT_PIN 15           // GP15 for PTT control
 
 static encoder_handle_t encoder = {0};
@@ -97,7 +96,7 @@ int main()
     gpio_pull_down(PTT_PIN);
     gpio_put(PTT_PIN, 0);
 
-    char test_data[] = "  Hello, this is Pico Constellation!";
+    char test_data[] = "  Hello!";
     test_data[0] = 0xAB; // Preamble byte 1
     test_data[1] = 0xBA; // Preamble byte 2
     encoder_write(&encoder, (unsigned char *)test_data, sizeof(test_data)-1);

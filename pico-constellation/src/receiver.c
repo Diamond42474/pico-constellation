@@ -12,11 +12,10 @@
 #include "decoding/fsk_decoder.h"
 #include "decoding/byte_assembler.h"
 
-#define BAUD_RATE 64 // Baud rate for FSK modulation
+#define BAUD_RATE 250 // Baud rate for FSK modulation
 #define F1 2200
 #define F0 1200
 #define POWER_THRESHOLD 0.01f // Power threshold for detecting bits
-#define SAMPLE_RATE 79200 
 
 static bool sample_ready = false;
 static size_t available_samples = 0;
@@ -34,7 +33,7 @@ int main(void)
     log_init(LOG_LEVEL_INFO); 
     LOG_INFO("Booting Pico Constellation...");
 
-    double sample_rate = SAMPLE_RATE; //calculate_sample_rate(F0, F1, BAUD_RATE);
+    double sample_rate = calculate_sample_rate(F0, F1, BAUD_RATE);
     size_t samples_per_bit = (size_t)(sample_rate / BAUD_RATE);
     LOG_INFO("FSK Timing: Sample Rate = %f Hz", sample_rate);
     LOG_INFO("FSK Timing: Samples per Bit = %d", samples_per_bit);
