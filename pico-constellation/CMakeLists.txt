@@ -11,11 +11,8 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Ofast")
 
 # Source files
 add_executable(${PROJECT_NAME}
-    #src/transmitter.c
-    src/receiver.c
-
-    # Communications
-    src/communication/communication_interface.c
+    src/transmitter.c
+    #src/receiver.c
 
     # Drivers
     src/drivers/ad9833.c
@@ -23,6 +20,12 @@ add_executable(${PROJECT_NAME}
 
     # Utils
     src/utils/HAL_time.c
+
+    # BSP
+    src/bsp/adc_bsp.c
+    src/bsp/dac_bsp.c
+    src/bsp/ptt_bsp.c
+    src/bsp/time_bsp.c
 )
 
 # Link libraries
@@ -32,6 +35,7 @@ target_link_libraries(${PROJECT_NAME}
     hardware_i2c
     hardware_adc
     hardware_dma
+    hardware_watchdog
 
     # Constellation
     peregrine-constellation
