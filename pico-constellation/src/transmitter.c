@@ -32,7 +32,7 @@ int main()
 
     char test_data[] = "KM7DEJ";
 
-    HAL_timer_start(&intermittent_timer, 2 * ONE_SECOND); // Start timer for intermittent sending
+    HAL_timer_start(&intermittent_timer, 30 * ONE_SECOND); // Start timer for intermittent sending
     while (true)
     {
         pc_task(handle);
@@ -40,7 +40,7 @@ int main()
         {
             HAL_timer_reset(&intermittent_timer); // Reset timer for next send
             LOG_INFO("Sending test data...");
-            if (pc_send_message(handle, 0xAB, test_data, sizeof(test_data) -1)) // Send test data to address 0x02
+            if (pc_send_message(handle, 0x02, test_data, sizeof(test_data) -1)) // Send test data to address 0x02
             {
                 LOG_ERROR("Failed to send test data");
             }
@@ -50,5 +50,3 @@ int main()
 failed:
     return ret;
 }
-
-// 02 48 00
