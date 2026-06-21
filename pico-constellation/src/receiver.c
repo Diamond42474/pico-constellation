@@ -6,12 +6,18 @@
 #include "hardware/watchdog.h"
 static HAL_timer_t intermittent_timer;
 
+static int count = 0;
 void data_callback(const uint8_t *data, size_t len, uint8_t src_addr)
 {
-    LOG_INFO("Decoded Data:");
+    LOG_INFO("%d Decoded Data from %d: ", count++, src_addr);
     for (size_t i = 0; i < len; i++)
     {
         printf("%02X ", data[i]);
+    }
+    printf("\n");
+    for (size_t i = 0; i < len; i++)
+    {
+        printf("%c", data[i]);
     }
     printf("\n");
 }
