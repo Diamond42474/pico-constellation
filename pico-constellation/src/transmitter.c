@@ -30,7 +30,7 @@ int main()
         goto failed;
     }
 
-    char test_data[] = "KM7DEJ";
+    char test_data[] = "Peregrine Constellation Test!";
 
     HAL_timer_start(&intermittent_timer, 30 * ONE_SECOND); // Start timer for intermittent sending
     while (true)
