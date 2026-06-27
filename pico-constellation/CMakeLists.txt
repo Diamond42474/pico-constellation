@@ -68,6 +68,8 @@ PRIVATE
     #LWIP_PROVIDE_ERRNO=1
 )
 
+target_compile_options(${PROJECT_NAME} PRIVATE -Ofast)
+
 # Enable USB output
 pico_enable_stdio_usb(${PROJECT_NAME} 1)
 pico_enable_stdio_uart(${PROJECT_NAME} 0)
