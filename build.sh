@@ -13,3 +13,7 @@ cd build
 # Build the project
 cmake ..
 make
+
+# Memory Usage Report
+cd ..
+python3 scripts/mem_report.py build/pico-constellation/pico-constellation.elf size.txt
