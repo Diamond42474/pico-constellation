@@ -16,7 +16,12 @@
 #define TCP_PORT 80
 #define POLL_TIME_S 5
 #define HTTP_GET "GET"
-#define HTTP_RESPONSE_HEADERS "HTTP/1.1 %d OK\nContent-Length: %d\nContent-Type: text/html; charset=utf-8\nConnection: close\n\n"
+#define HTTP_RESPONSE_HEADERS                    \
+    "HTTP/1.1 %d OK\r\n"                         \
+    "Content-Length: %d\r\n"                     \
+    "Content-Type: text/html; charset=utf-8\r\n" \
+    "Connection: close\r\n"                      \
+    "\r\n"
 
 typedef struct TCP_SERVER_T_
 {
@@ -28,12 +33,16 @@ typedef struct TCP_SERVER_T_
 typedef struct TCP_CONNECT_STATE_T_
 {
     struct tcp_pcb *pcb;
-    int sent_len;
-    char headers[512];
-    char result[512];
-    int header_len;
-    int result_len;
     ip_addr_t *gw;
+
+    char request[2048];
+    size_t request_len;
+
+    char response_headers[256];
+    size_t response_header_len;
+
+    size_t response_body_len;
+    size_t sent_len;
 } TCP_CONNECT_STATE_T;
 
 static err_t tcp_close_client_connection(TCP_CONNECT_STATE_T *con_state, struct tcp_pcb *client_pcb, err_t close_err);
@@ -44,7 +53,7 @@ static err_t tcp_server_poll(void *arg, struct tcp_pcb *pcb);
 static void tcp_server_err(void *arg, err_t err);
 static err_t tcp_server_accept(void *arg, struct tcp_pcb *client_pcb, err_t err);
 static bool tcp_server_open(void *arg, const char *ap_name);
-static bool parse_http_request(char *request_line, http_request_t *req);
+static int parse_http_request(char *request_line, http_request_t *req);
 
 static TCP_SERVER_T *state;
 static dhcp_server_t dhcp_server;
@@ -149,9 +158,10 @@ static err_t tcp_server_sent(void *arg, struct tcp_pcb *pcb, u16_t len)
     TCP_CONNECT_STATE_T *con_state = (TCP_CONNECT_STATE_T *)arg;
     LOG_DEBUG("tcp_server_sent %u", len);
     con_state->sent_len += len;
-    if (con_state->sent_len >= con_state->header_len + con_state->result_len)
+    if (con_state->sent_len >= con_state->response_header_len + con_state->response_body_len)
     {
         LOG_DEBUG("all done");
+        con_state->request_len = 0;
         return tcp_close_client_connection(con_state, pcb, ERR_OK);
     }
     return ERR_OK;
@@ -170,30 +180,58 @@ static http_method_t parse_http_method(const char *s)
     return HTTP_METHOD_UNKNOWN;
 }
 
-static bool parse_http_request(char *request_line, http_request_t *req)
+static int parse_http_request(char *request, http_request_t *req)
 {
-    if (!request_line || !req)
-        return false;
+    if (!request || !req)
+    {
+        LOG_ERROR("request or req is NULL");
+        return -1;
+    }
 
-    char *method = request_line;
+    memset(req, 0, sizeof(*req));
+
+    // Find the start of the body.
+    char *body = strstr(request, "\r\n\r\n");
+    if (body)
+    {
+        *body = '\0';
+        body += 4;
+
+        size_t body_len = strlen(body);
+        if (body_len >= HTML_MAX_QUERY_LEN)
+        {
+            LOG_ERROR("Body too large");
+            return -1;
+        }
+
+        memcpy(req->body, body, body_len + 1);
+    }
+
+    // Parse request line.
+    char *method = request;
     char *space = strchr(method, ' ');
     if (!space)
-        return false;
+    {
+        LOG_ERROR("Malformed request");
+        return -1;
+    }
 
     *space++ = '\0';
     while (*space == ' ')
         space++;
 
     char *path = space;
-    if (!*path)
-        return false;
 
-    char *end = strchr(path, ' ');
-    if (!end)
-        return false;
+    space = strchr(path, ' ');
+    if (!space)
+    {
+        LOG_ERROR("Malformed request");
+        return -1;
+    }
 
-    *end = '\0';
+    *space = '\0';
 
+    // Split query string from path.
     char *query = strchr(path, '?');
     if (query)
     {
@@ -202,115 +240,172 @@ static bool parse_http_request(char *request_line, http_request_t *req)
 
     req->method = parse_http_method(method);
     if (req->method == HTTP_METHOD_UNKNOWN)
-        return false;
+    {
+        LOG_ERROR("Unknown HTTP method");
+        return -1;
+    }
 
-    size_t path_len = strlen(path);
-    if (path_len >= HTML_MAX_PATH_LEN)
-        return false;
-    memcpy(req->path, path, path_len + 1);
+    if (strlen(path) >= HTML_MAX_PATH_LEN)
+    {
+        LOG_ERROR("Path too long");
+        return -1;
+    }
+
+    strcpy(req->path, path);
 
     if (query)
     {
-        size_t query_len = strlen(query);
-        if (query_len >= HTML_MAX_QUERY_LEN)
-            return false;
-        memcpy(req->query, query, query_len + 1);
-    }
-    else
-    {
-        req->query[0] = '\0';
+        if (strlen(query) >= HTML_MAX_QUERY_LEN)
+        {
+            LOG_ERROR("Query too long");
+            return -1;
+        }
+
+        strcpy(req->query, query);
     }
 
-    return true;
+    return 0;
+}
+
+static bool http_request_complete(TCP_CONNECT_STATE_T *con)
+{
+    char *end = strstr(con->request, "\r\n\r\n");
+    if (!end)
+        return false;
+
+    size_t header_len = end - con->request + 4;
+
+    char *cl = strstr(con->request, "Content-Length:");
+    if (!cl)
+        return true; // GET, HEAD, etc.
+
+    size_t body_len = atoi(cl + 15);
+
+    return con->request_len >= header_len + body_len;
 }
 
 err_t tcp_server_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
 {
-    TCP_CONNECT_STATE_T *con_state = (TCP_CONNECT_STATE_T *)arg;
-    if (!p)
+    TCP_CONNECT_STATE_T *con = (TCP_CONNECT_STATE_T *)arg;
+
+    if (p == NULL)
     {
         LOG_INFO("connection closed");
-        return tcp_close_client_connection(con_state, pcb, ERR_OK);
+        return tcp_close_client_connection(con, pcb, ERR_OK);
     }
-    assert(con_state && con_state->pcb == pcb);
 
-    // Print full request:
-
-    if (p->tot_len > 0)
+    if (err != ERR_OK)
     {
-        LOG_DEBUG("tcp_server_recv %d err %d", p->tot_len, err);
+        pbuf_free(p);
+        return tcp_close_client_connection(con, pcb, err);
+    }
 
-        // Copy the request into the buffer
-        size_t copy_len = p->tot_len > sizeof(con_state->headers) - 1 ? sizeof(con_state->headers) - 1 : p->tot_len;
-        pbuf_copy_partial(p, con_state->headers, copy_len, 0);
-        con_state->headers[copy_len] = '\0';
+    // Ensure the request fits in our buffer.
+    if (con->request_len + p->tot_len >= sizeof(con->request))
+    {
+        LOG_ERROR("HTTP request too large");
+        pbuf_free(p);
+        return tcp_close_client_connection(con, pcb, ERR_BUF);
+    }
 
-        LOG_INFO("HTTP REQUEST: %s", con_state->headers);
+    // Append the received data.
+    pbuf_copy_partial(
+        p,
+        con->request + con->request_len,
+        p->tot_len,
+        0);
 
-        // Handle request
-        http_request_t http_request;
-        if (!parse_http_request(con_state->headers, &http_request))
-        {
-            LOG_ERROR("Failed to parse HTTP request");
-            return tcp_close_client_connection(con_state, pcb, ERR_CLSD);
-        }
+    con->request_len += p->tot_len;
+    con->request[con->request_len] = '\0';
 
-        if (ui_handle_event(&http_contents, &http_request))
-        {
-            LOG_ERROR("Failed to handle UI event");
-            return tcp_close_client_connection(con_state, pcb, ERR_CLSD);
-        }
+    tcp_recved(pcb, p->tot_len);
+    pbuf_free(p);
 
-        con_state->result_len = http_contents.length;
+    // Wait until the full HTTP request has arrived.
+    if (!http_request_complete(con))
+    {
+        return ERR_OK;
+    }
 
-        // Check we had enough buffer space
-        // if (con_state->result_len > sizeof(con_state->result) - 1)
-        // {
-        //     LOG_ERROR("Too much result data %d", con_state->result_len);
-        //     return tcp_close_client_connection(con_state, pcb, ERR_CLSD);
-        // }
+    // LOG_INFO("HTTP REQUEST:\n%s", con->request);
 
-        // Generate web page
-        if (con_state->result_len > 0)
-        {
-            con_state->header_len = snprintf(con_state->headers, sizeof(con_state->headers), HTTP_RESPONSE_HEADERS,
-                                             200, con_state->result_len);
-            if (con_state->header_len > sizeof(con_state->headers) - 1)
-            {
-                LOG_ERROR("Too much header data %d", con_state->header_len);
-                return tcp_close_client_connection(con_state, pcb, ERR_CLSD);
-            }
-        }
-        // else
-        // {
-        //     // Send redirect
-        //     con_state->header_len = snprintf(con_state->headers, sizeof(con_state->headers), HTTP_RESPONSE_REDIRECT,
-        //                                      ipaddr_ntoa(con_state->gw));
-        //     LOG_INFO("Sending redirect %s", con_state->headers);
-        // }
+    http_request_t http_request;
+    if (parse_http_request(con->request, &http_request))
+    {
+        LOG_ERROR("Failed to parse HTTP request");
+        return tcp_close_client_connection(con, pcb, ERR_CLSD);
+    }
 
-        // Send the headers to the client
-        con_state->sent_len = 0;
-        err_t err = tcp_write(pcb, con_state->headers, con_state->header_len, 0);
+    if (ui_handle_event(&http_contents, &http_request))
+    {
+        LOG_ERROR("Failed to handle UI event");
+        return tcp_close_client_connection(con, pcb, ERR_CLSD);
+    }
+
+    con->response_body_len = http_contents.length;
+
+    con->response_header_len = snprintf(
+        con->response_headers,
+        sizeof(con->response_headers),
+        HTTP_RESPONSE_HEADERS,
+        200,
+        con->response_body_len);
+
+    if (con->response_header_len >= sizeof(con->response_headers))
+    {
+        LOG_ERROR("Response headers too large");
+        return tcp_close_client_connection(con, pcb, ERR_BUF);
+    }
+
+    con->sent_len = 0;
+
+    LOG_INFO("pcb=%p", pcb);
+    LOG_INFO("sndbuf=%u", tcp_sndbuf(pcb));
+    LOG_INFO("sndqueuelen=%u", pcb->snd_queuelen);
+    LOG_INFO("header_len=%u", con->response_header_len);
+    LOG_INFO("body_len=%u", con->response_body_len);
+    LOG_INFO("Response:\n%s", con->response_headers);
+
+    err = tcp_write(
+        pcb,
+        con->response_headers,
+        con->response_header_len,
+        TCP_WRITE_FLAG_COPY);
+
+    if (err != ERR_OK)
+    {
+        LOG_INFO("header=%u body=%u sndbuf=%u",
+                 con->response_header_len,
+                 con->response_body_len,
+                 tcp_sndbuf(pcb));
+        LOG_ERROR("Failed to send response headers: %d", err);
+        return tcp_close_client_connection(con, pcb, err);
+    }
+
+    if (con->response_body_len)
+    {
+        err = tcp_write(
+            pcb,
+            http_contents.contents,
+            con->response_body_len,
+            TCP_WRITE_FLAG_COPY);
+
         if (err != ERR_OK)
         {
-            LOG_ERROR("failed to write header data %d", err);
-            return tcp_close_client_connection(con_state, pcb, err);
+            LOG_INFO("header=%u body=%u sndbuf=%u",
+                     con->response_header_len,
+                     con->response_body_len,
+                     tcp_sndbuf(pcb));
+            LOG_ERROR("Failed to send response body: %d", err);
+            return tcp_close_client_connection(con, pcb, err);
         }
-
-        // Send the body to the client
-        if (http_contents.length)
-        {
-            err = tcp_write(pcb, http_contents.contents, http_contents.length, 0);
-            if (err != ERR_OK)
-            {
-                LOG_ERROR("failed to write result data %d", err);
-                return tcp_close_client_connection(con_state, pcb, err);
-            }
-        }
-        tcp_recved(pcb, p->tot_len);
     }
-    pbuf_free(p);
+
+    tcp_output(pcb);
+
+    // Ready for another request if the connection stays open.
+    con->request_len = 0;
+
     return ERR_OK;
 }
 

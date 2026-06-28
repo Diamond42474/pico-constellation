@@ -34,6 +34,7 @@ int ui_handle_event(http_contents_t *contents, http_request_t *request)
 {
     LOG_INFO("Path: %s", request->path);
     LOG_INFO("Query: %s", request->query);
+    LOG_INFO("Body: %s", request->body);
 
     if (strcmp(request->path, "/update") == 0)
     {
@@ -97,9 +98,10 @@ int _send(http_contents_t *contents, http_request_t *request)
     {
         snprintf(messages[message_index].name, 32, "Me");
         snprintf(messages[message_index].time, 32, "unknown");
-        snprintf(messages[message_index].message, 100, "This is a test");
+        snprintf(messages[message_index].message, 100, request->body);
         message_index++;
     }
     contents->update = false;
+    contents->length = 0;
     return 0;
 }
