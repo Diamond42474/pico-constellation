@@ -5,8 +5,8 @@
 #include "stddef.h"
 
 #define HTML_MAX_CONTENTS (1024 * 4)
-#define HTML_MAX_PATH_LEN (256)
-#define HTML_MAX_QUERY_LEN (256)
+#define HTML_MAX_PATH_LEN (1024)
+#define HTML_MAX_QUERY_LEN (1024)
 
 typedef struct http_contents
 {

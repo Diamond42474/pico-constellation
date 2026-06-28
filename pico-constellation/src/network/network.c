@@ -45,7 +45,6 @@ typedef struct TCP_CONNECT_STATE_T_
 static err_t tcp_close_client_connection(TCP_CONNECT_STATE_T *con_state, struct tcp_pcb *client_pcb, err_t close_err);
 static void tcp_server_close(TCP_SERVER_T *state);
 static err_t tcp_server_sent(void *arg, struct tcp_pcb *pcb, u16_t len);
-static int test_server_content(const char *request, const char *params, char *result, size_t max_result_len);
 err_t tcp_server_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err);
 static err_t tcp_server_poll(void *arg, struct tcp_pcb *pcb);
 static void tcp_server_err(void *arg, err_t err);
@@ -163,47 +162,6 @@ static err_t tcp_server_sent(void *arg, struct tcp_pcb *pcb, u16_t len)
     return ERR_OK;
 }
 
-static int test_server_content(const char *request, const char *params, char *result, size_t max_result_len)
-{
-    int len = 0;
-    if (strncmp(request, LED_TEST, sizeof(LED_TEST) - 1) == 0)
-    {
-        // Get the state of the led
-        bool value;
-        cyw43_gpio_get(&cyw43_state, LED_GPIO, &value);
-        int led_state = value;
-
-        // See if the user changed it
-        if (params)
-        {
-            int led_param = sscanf(params, LED_PARAM, &led_state);
-            if (led_param == 1)
-            {
-                if (led_state)
-                {
-                    // Turn led on
-                    cyw43_gpio_set(&cyw43_state, LED_GPIO, true);
-                }
-                else
-                {
-                    // Turn led off
-                    cyw43_gpio_set(&cyw43_state, LED_GPIO, false);
-                }
-            }
-        }
-        // Generate result
-        if (led_state)
-        {
-            len = snprintf(result, max_result_len, LED_TEST_BODY, "ON", 0, "OFF");
-        }
-        else
-        {
-            len = snprintf(result, max_result_len, LED_TEST_BODY, "OFF", 1, "ON");
-        }
-    }
-    return len;
-}
-
 err_t tcp_server_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
 {
     TCP_CONNECT_STATE_T *con_state = (TCP_CONNECT_STATE_T *)arg;
@@ -254,7 +212,6 @@ err_t tcp_server_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
             }
 
             con_state->result_len = http_contents.length;
-            // conn_state->result_len test_server_content(request, params, con_state->result, sizeof(con_state->result));
 
             // Check we had enough buffer space
             // if (con_state->result_len > sizeof(con_state->result) - 1)
