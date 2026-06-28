@@ -1,0 +1,136 @@
+<!doctype html>
+<html>
+
+<head>
+  <meta charset=utf-8>
+  <meta name=viewport content="width=device-width,initial-scale=1.0">
+  <style>
+    body {
+      margin: 0;
+      background: #090b0f;
+      color: #eef;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 10px;
+      font: 18px sans-serif;
+    }
+
+    #m {
+      flex: 1;
+      overflow: auto;
+      padding: 4px;
+    }
+
+    input,
+    button {
+      font: 18px sans-serif;
+    }
+
+    input {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      background: #0b1220;
+      color: #eef;
+    }
+
+    button {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 10px;
+      background: #3b82f6;
+      color: #fff;
+      cursor: pointer;
+    }
+
+    article {
+      margin: 0 0 8px;
+      background: #111;
+      padding: 8px;
+      border-radius: 8px;
+    }
+
+    strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id=n>Node ID: %s</div>
+  <div id=m>
+    <article>
+      <strong>Loading...</strong>
+    </article>
+  </div>
+  <input id=i maxlength=100 autocomplete=off placeholder="Type a message...">
+  <button id=b>Send</button>
+  <small><span id=d>0</span>/100</small>
+  <script>
+    const m = document.getElementById('m');
+    const i = document.getElementById('i');
+    const d = document.getElementById('d');
+    const b = document.getElementById('b');
+
+    i.oninput = () => {
+      d.textContent = i.value.length;
+    };
+
+    async function u() {
+      try {
+        const r = await fetch("/update", { cache: 'no-store' });
+        if (!r.ok) throw 0;
+        const j = await r.json();
+        m.textContent = '';
+
+        if (!j || !j.length) {
+          const a = document.createElement('article');
+          a.textContent = 'No messages yet.';
+          m.append(a);
+          return;
+        }
+
+        j.slice().reverse().forEach(x => {
+          const a = document.createElement('article');
+          const s = document.createElement('strong');
+          s.textContent = x.name || 'Unknown';
+          a.append(s, document.createTextNode(x.text || ''));
+
+          if (x.time) {
+            const t = document.createElement('time');
+            t.textContent = x.time;
+            a.append(t);
+          }
+
+          m.append(a);
+        });
+
+        m.scrollTop = m.scrollHeight;
+      } catch {
+      }
+    }
+
+    b.onclick = async () => {
+      const t = i.value.trim();
+      if (!t) return;
+      await fetch("/send", {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ message: t })
+      });
+      i.value = '';
+      d.textContent = 0;
+      u();
+    };
+
+    u();
+    setInterval(u, 5000);
+  </script>
+</body>
+
+</html>

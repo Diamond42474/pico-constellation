@@ -3,50 +3,22 @@
 #include <stdio.h>
 #include <string.h>
 #include "c-logger.h"
+#include "pages/home_page.h"
+#include "interface/pconfig.h"
 
-#define HTML_CONTENT                                                                \
-    "<!DOCTYPE html>"                                                               \
-    "<html>"                                                                        \
-    "<head>"                                                                        \
-    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"      \
-    "<style>"                                                                       \
-    "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial;"    \
-    "background:#0b0f14;color:#e6edf3;margin:0;padding:20px;}"                      \
-    ".card{background:#111826;border-radius:16px;padding:16px;margin:12px 0;"       \
-    "box-shadow:0 4px 16px rgba(0,0,0,0.3);}"                                       \
-    ".label{color:#8b949e;font-size:13px;margin-bottom:4px;}"                       \
-    ".value{font-size:18px;font-weight:600;word-break:break-word;}"                 \
-    "h1{font-size:20px;margin-bottom:16px;}"                                        \
-    "</style>"                                                                      \
-    "</head>"                                                                       \
-    "<body>"                                                                        \
-    "<h1>Request Info</h1>"                                                         \
-    "<div class='card'>"                                                            \
-    "<div class='label'>METHOD</div><div class='value'>%d</div>"                    \
-    "</div>"                                                                        \
-    "<div class='card'>"                                                            \
-    "<div class='label'>PATH</div><div class='value'>%s</div>"                      \
-    "</div>"                                                                        \
-    "<div class='card'>"                                                            \
-    "<div class='label'>QUERY</div><div class='value'>%s</div>"                     \
-    "</div>"                                                                        \
-    "<div class='card'>"                                                            \
-    "<div class='label'>COUNT</div><div class='value' id=\"count\">0</div>"         \
-    "</div>"                                                                        \
-    "<script>"                                                                      \
-    "async function update() {"                                                     \
-    "const response = await fetch(\"/count\");"                                     \
-    "const data = await response.json();"\
-    "document.getElementById(\"count\").textContent = data.count;" \
-    "}"                                                                             \
-    "setInterval(update, 1000);"                                                    \
-    "update();"                                                                     \
-    "</script>"                                                                     \
-    "</body>"                                                                       \
-    "</html>"
+typedef struct
+{
+    char name[32];
+    char time[32];
+    char message[100];
+} message_t;
 
-static int _count(http_contents_t *contents, http_request_t *request);
+static message_t messages[32];
+static int message_index = 0;
+
+static int _update(http_contents_t *contents, http_request_t *request);
 static int _home_page(http_contents_t *contents, http_request_t *request);
+static int _send(http_contents_t *contents, http_request_t *request);
 
 int ui_init(void)
 {
@@ -61,9 +33,15 @@ int ui_deinit(void)
 int ui_handle_event(http_contents_t *contents, http_request_t *request)
 {
     LOG_INFO("Path: %s", request->path);
-    if (strcmp(request->path, "/count") == 0)
+    LOG_INFO("Query: %s", request->query);
+
+    if (strcmp(request->path, "/update") == 0)
     {
-        return _count(contents, request);
+        return _update(contents, request);
+    }
+    else if (strcmp(request->path, "/send") == 0)
+    {
+        return _send(contents, request);
     }
     else
     {
@@ -75,17 +53,53 @@ int ui_handle_event(http_contents_t *contents, http_request_t *request)
 
 int _home_page(http_contents_t *contents, http_request_t *request)
 {
-    snprintf(contents->contents, HTML_MAX_CONTENTS, HTML_CONTENT, request->method, request->path, request->query);
+    snprintf(contents->contents, HTML_MAX_CONTENTS, home_compressed, pconfigFCC_CALLSIGN);
     contents->length = strlen(contents->contents);
     contents->update = true;
 }
 
-int _count(http_contents_t *contents, http_request_t *request)
+size_t messages_to_json(char *buffer, size_t buffer_size)
+{
+    size_t len = 0;
+
+    len += snprintf(buffer + len, buffer_size - len, "[");
+
+    for (int i = 0; i < message_index; i++)
+    {
+        len += snprintf(
+            buffer + len,
+            buffer_size - len,
+            "%s{\"name\":\"%s\",\"text\":\"%s\",\"time\":\"%s\"}",
+            (i == 0) ? "" : ",",
+            messages[i].name,
+            messages[i].message,
+            messages[i].time);
+    }
+
+    len += snprintf(buffer + len, buffer_size - len, "]");
+
+    return len;
+}
+
+int _update(http_contents_t *contents, http_request_t *request)
 {
     static int count = 0;
-    snprintf(contents->contents, HTML_MAX_CONTENTS, "{\"count\":%d}", count++);
+    messages_to_json(contents->contents, HTML_MAX_CONTENTS);
     contents->length = strlen(contents->contents);
     contents->update = true;
 
+    return 0;
+}
+
+int _send(http_contents_t *contents, http_request_t *request)
+{
+    if (message_index < 31)
+    {
+        snprintf(messages[message_index].name, 32, "Me");
+        snprintf(messages[message_index].time, 32, "unknown");
+        snprintf(messages[message_index].message, 100, "This is a test");
+        message_index++;
+    }
+    contents->update = false;
     return 0;
 }

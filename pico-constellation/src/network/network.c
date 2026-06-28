@@ -14,15 +14,9 @@
 #define BSSID "pico-constellation"
 #define PASSWORD "peregrine"
 #define TCP_PORT 80
-#define DEBUG_printf LOG_DEBUG
 #define POLL_TIME_S 5
 #define HTTP_GET "GET"
 #define HTTP_RESPONSE_HEADERS "HTTP/1.1 %d OK\nContent-Length: %d\nContent-Type: text/html; charset=utf-8\nConnection: close\n\n"
-#define LED_TEST_BODY "<html><body><h1>Hello from Pico Constellation.</h1><p>Led is %s</p><p><a href=\"?led=%d\">Turn led %s</a></body></html>"
-#define LED_PARAM "led=%d"
-#define LED_TEST "/ledtest"
-#define LED_GPIO 0
-#define HTTP_RESPONSE_REDIRECT "HTTP/1.1 302 Redirect\nLocation: http://%s" LED_TEST "\n\n"
 
 typedef struct TCP_SERVER_T_
 {
@@ -35,8 +29,8 @@ typedef struct TCP_CONNECT_STATE_T_
 {
     struct tcp_pcb *pcb;
     int sent_len;
-    char headers[128];
-    char result[256];
+    char headers[512];
+    char result[512];
     int header_len;
     int result_len;
     ip_addr_t *gw;
@@ -50,6 +44,7 @@ static err_t tcp_server_poll(void *arg, struct tcp_pcb *pcb);
 static void tcp_server_err(void *arg, err_t err);
 static err_t tcp_server_accept(void *arg, struct tcp_pcb *client_pcb, err_t err);
 static bool tcp_server_open(void *arg, const char *ap_name);
+static bool parse_http_request(char *request_line, http_request_t *req);
 
 static TCP_SERVER_T *state;
 static dhcp_server_t dhcp_server;
@@ -61,13 +56,13 @@ int network_init(void)
     state = calloc(1, sizeof(TCP_SERVER_T));
     if (!state)
     {
-        DEBUG_printf("failed to allocate state\n");
+        LOG_ERROR("failed to allocate state");
         return 1;
     }
 
     if (cyw43_arch_init())
     {
-        DEBUG_printf("failed to initialise\n");
+        LOG_ERROR("failed to initialise");
         return 1;
     }
 
@@ -90,7 +85,7 @@ int network_init(void)
 
     if (!tcp_server_open(state, BSSID))
     {
-        DEBUG_printf("failed to open server\n");
+        LOG_ERROR("failed to open server");
         return 1;
     }
 
@@ -127,7 +122,7 @@ static err_t tcp_close_client_connection(TCP_CONNECT_STATE_T *con_state, struct 
         err_t err = tcp_close(client_pcb);
         if (err != ERR_OK)
         {
-            DEBUG_printf("close failed %d, calling abort\n", err);
+            LOG_ERROR("close failed %d, calling abort", err);
             tcp_abort(client_pcb);
             close_err = ERR_ABRT;
         }
@@ -152,14 +147,81 @@ static void tcp_server_close(TCP_SERVER_T *state)
 static err_t tcp_server_sent(void *arg, struct tcp_pcb *pcb, u16_t len)
 {
     TCP_CONNECT_STATE_T *con_state = (TCP_CONNECT_STATE_T *)arg;
-    DEBUG_printf("tcp_server_sent %u\n", len);
+    LOG_DEBUG("tcp_server_sent %u", len);
     con_state->sent_len += len;
     if (con_state->sent_len >= con_state->header_len + con_state->result_len)
     {
-        DEBUG_printf("all done\n");
+        LOG_DEBUG("all done");
         return tcp_close_client_connection(con_state, pcb, ERR_OK);
     }
     return ERR_OK;
+}
+
+static http_method_t parse_http_method(const char *s)
+{
+    if (strcmp(s, "GET") == 0)
+        return HTTP_METHOD_GET;
+    if (strcmp(s, "POST") == 0)
+        return HTTP_METHOD_POST;
+    if (strcmp(s, "PUT") == 0)
+        return HTTP_METHOD_PUT;
+    if (strcmp(s, "DELETE") == 0)
+        return HTTP_METHOD_DELETE;
+    return HTTP_METHOD_UNKNOWN;
+}
+
+static bool parse_http_request(char *request_line, http_request_t *req)
+{
+    if (!request_line || !req)
+        return false;
+
+    char *method = request_line;
+    char *space = strchr(method, ' ');
+    if (!space)
+        return false;
+
+    *space++ = '\0';
+    while (*space == ' ')
+        space++;
+
+    char *path = space;
+    if (!*path)
+        return false;
+
+    char *end = strchr(path, ' ');
+    if (!end)
+        return false;
+
+    *end = '\0';
+
+    char *query = strchr(path, '?');
+    if (query)
+    {
+        *query++ = '\0';
+    }
+
+    req->method = parse_http_method(method);
+    if (req->method == HTTP_METHOD_UNKNOWN)
+        return false;
+
+    size_t path_len = strlen(path);
+    if (path_len >= HTML_MAX_PATH_LEN)
+        return false;
+    memcpy(req->path, path, path_len + 1);
+
+    if (query)
+    {
+        size_t query_len = strlen(query);
+        if (query_len >= HTML_MAX_QUERY_LEN)
+            return false;
+        memcpy(req->query, query, query_len + 1);
+    }
+    else
+    {
+        req->query[0] = '\0';
+    }
+
+    return true;
 }
 
 err_t tcp_server_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
@@ -167,96 +229,83 @@ err_t tcp_server_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
     TCP_CONNECT_STATE_T *con_state = (TCP_CONNECT_STATE_T *)arg;
     if (!p)
     {
-        DEBUG_printf("connection closed\n");
+        LOG_INFO("connection closed");
         return tcp_close_client_connection(con_state, pcb, ERR_OK);
     }
     assert(con_state && con_state->pcb == pcb);
+
+    // Print full request:
+
     if (p->tot_len > 0)
     {
-        DEBUG_printf("tcp_server_recv %d err %d\n", p->tot_len, err);
+        LOG_DEBUG("tcp_server_recv %d err %d", p->tot_len, err);
+
         // Copy the request into the buffer
-        pbuf_copy_partial(p, con_state->headers, p->tot_len > sizeof(con_state->headers) - 1 ? sizeof(con_state->headers) - 1 : p->tot_len, 0);
+        size_t copy_len = p->tot_len > sizeof(con_state->headers) - 1 ? sizeof(con_state->headers) - 1 : p->tot_len;
+        pbuf_copy_partial(p, con_state->headers, copy_len, 0);
+        con_state->headers[copy_len] = '\0';
 
-        // Handle GET request
-        if (strncmp(HTTP_GET, con_state->headers, sizeof(HTTP_GET) - 1) == 0)
+        LOG_INFO("HTTP REQUEST: %s", con_state->headers);
+
+        // Handle request
+        http_request_t http_request;
+        if (!parse_http_request(con_state->headers, &http_request))
         {
-            char *request = con_state->headers + sizeof(HTTP_GET); // + space
-            char *params = strchr(request, '?');
-            if (params)
-            {
-                if (*params)
-                {
-                    char *space = strchr(request, ' ');
-                    *params++ = 0;
-                    if (space)
-                    {
-                        *space = 0;
-                    }
-                }
-                else
-                {
-                    params = NULL;
-                }
-            }
+            LOG_ERROR("Failed to parse HTTP request");
+            return tcp_close_client_connection(con_state, pcb, ERR_CLSD);
+        }
 
-            // Generate content
-            http_request_t http_request;
-            http_request.method = GET;
-            snprintf(http_request.path, HTML_MAX_PATH_LEN, "%s", request);
-            snprintf(http_request.query, HTML_MAX_QUERY_LEN, "%s", params);
+        if (ui_handle_event(&http_contents, &http_request))
+        {
+            LOG_ERROR("Failed to handle UI event");
+            return tcp_close_client_connection(con_state, pcb, ERR_CLSD);
+        }
 
-            if (ui_handle_event(&http_contents, &http_request))
+        con_state->result_len = http_contents.length;
+
+        // Check we had enough buffer space
+        // if (con_state->result_len > sizeof(con_state->result) - 1)
+        // {
+        //     LOG_ERROR("Too much result data %d", con_state->result_len);
+        //     return tcp_close_client_connection(con_state, pcb, ERR_CLSD);
+        // }
+
+        // Generate web page
+        if (con_state->result_len > 0)
+        {
+            con_state->header_len = snprintf(con_state->headers, sizeof(con_state->headers), HTTP_RESPONSE_HEADERS,
+                                             200, con_state->result_len);
+            if (con_state->header_len > sizeof(con_state->headers) - 1)
             {
-                LOG_ERROR("Failed to handle UI event");
+                LOG_ERROR("Too much header data %d", con_state->header_len);
                 return tcp_close_client_connection(con_state, pcb, ERR_CLSD);
             }
+        }
+        // else
+        // {
+        //     // Send redirect
+        //     con_state->header_len = snprintf(con_state->headers, sizeof(con_state->headers), HTTP_RESPONSE_REDIRECT,
+        //                                      ipaddr_ntoa(con_state->gw));
+        //     LOG_INFO("Sending redirect %s", con_state->headers);
+        // }
 
-            con_state->result_len = http_contents.length;
+        // Send the headers to the client
+        con_state->sent_len = 0;
+        err_t err = tcp_write(pcb, con_state->headers, con_state->header_len, 0);
+        if (err != ERR_OK)
+        {
+            LOG_ERROR("failed to write header data %d", err);
+            return tcp_close_client_connection(con_state, pcb, err);
+        }
 
-            // Check we had enough buffer space
-            // if (con_state->result_len > sizeof(con_state->result) - 1)
-            // {
-            //     LOG_ERROR("Too much result data %d\n", con_state->result_len);
-            //     return tcp_close_client_connection(con_state, pcb, ERR_CLSD);
-            // }
-
-            // Generate web page
-            if (con_state->result_len > 0)
-            {
-                con_state->header_len = snprintf(con_state->headers, sizeof(con_state->headers), HTTP_RESPONSE_HEADERS,
-                                                 200, con_state->result_len);
-                if (con_state->header_len > sizeof(con_state->headers) - 1)
-                {
-                    DEBUG_printf("Too much header data %d\n", con_state->header_len);
-                    return tcp_close_client_connection(con_state, pcb, ERR_CLSD);
-                }
-            }
-            else
-            {
-                // Send redirect
-                con_state->header_len = snprintf(con_state->headers, sizeof(con_state->headers), HTTP_RESPONSE_REDIRECT,
-                                                 ipaddr_ntoa(con_state->gw));
-                DEBUG_printf("Sending redirect %s", con_state->headers);
-            }
-
-            // Send the headers to the client
-            con_state->sent_len = 0;
-            err_t err = tcp_write(pcb, con_state->headers, con_state->header_len, 0);
+        // Send the body to the client
+        if (http_contents.length)
+        {
+            err = tcp_write(pcb, http_contents.contents, http_contents.length, 0);
             if (err != ERR_OK)
             {
-                DEBUG_printf("failed to write header data %d\n", err);
+                LOG_ERROR("failed to write result data %d", err);
                 return tcp_close_client_connection(con_state, pcb, err);
-            }
-
-            // Send the body to the client
-            if (http_contents.length)
-            {
-                err = tcp_write(pcb, http_contents.contents, http_contents.length, 0);
-                if (err != ERR_OK)
-                {
-                    DEBUG_printf("failed to write result data %d\n", err);
-                    return tcp_close_client_connection(con_state, pcb, err);
-                }
             }
         }
         tcp_recved(pcb, p->tot_len);
@@ -268,7 +317,7 @@ err_t tcp_server_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
 static err_t tcp_server_poll(void *arg, struct tcp_pcb *pcb)
 {
     TCP_CONNECT_STATE_T *con_state = (TCP_CONNECT_STATE_T *)arg;
-    DEBUG_printf("tcp_server_poll_fn\n");
+    LOG_INFO("tcp_server_poll_fn");
     return tcp_close_client_connection(con_state, pcb, ERR_OK); // Just disconnect clent?
 }
 
@@ -277,7 +326,7 @@ static void tcp_server_err(void *arg, err_t err)
     TCP_CONNECT_STATE_T *con_state = (TCP_CONNECT_STATE_T *)arg;
     if (err != ERR_ABRT)
     {
-        DEBUG_printf("tcp_client_err_fn %d\n", err);
+        LOG_ERROR("tcp_client_err_fn %d", err);
         tcp_close_client_connection(con_state, con_state->pcb, err);
     }
 }
@@ -287,16 +336,16 @@ static err_t tcp_server_accept(void *arg, struct tcp_pcb *client_pcb, err_t err)
     TCP_SERVER_T *state = (TCP_SERVER_T *)arg;
     if (err != ERR_OK || client_pcb == NULL)
     {
-        DEBUG_printf("failure in accept\n");
+        LOG_ERROR("failure in accept");
         return ERR_VAL;
     }
-    DEBUG_printf("client connected\n");
+    LOG_DEBUG("client connected");
 
     // Create the state for the connection
     TCP_CONNECT_STATE_T *con_state = calloc(1, sizeof(TCP_CONNECT_STATE_T));
     if (!con_state)
     {
-        DEBUG_printf("failed to allocate connect state\n");
+        LOG_ERROR("failed to allocate connect state");
         return ERR_MEM;
     }
     con_state->pcb = client_pcb; // for checking
@@ -315,26 +364,26 @@ static err_t tcp_server_accept(void *arg, struct tcp_pcb *client_pcb, err_t err)
 static bool tcp_server_open(void *arg, const char *ap_name)
 {
     TCP_SERVER_T *state = (TCP_SERVER_T *)arg;
-    DEBUG_printf("starting server on port %d\n", TCP_PORT);
+    LOG_INFO("starting server on port %d", TCP_PORT);
 
     struct tcp_pcb *pcb = tcp_new_ip_type(IPADDR_TYPE_ANY);
     if (!pcb)
     {
-        DEBUG_printf("failed to create pcb\n");
+        LOG_ERROR("failed to create pcb");
         return false;
     }
 
     err_t err = tcp_bind(pcb, IP_ANY_TYPE, TCP_PORT);
     if (err)
     {
-        DEBUG_printf("failed to bind to port %d\n", TCP_PORT);
+        LOG_ERROR("failed to bind to port %d", TCP_PORT);
         return false;
     }
 
     state->server_pcb = tcp_listen_with_backlog(pcb, 1);
     if (!state->server_pcb)
     {
-        DEBUG_printf("failed to listen\n");
+        LOG_ERROR("failed to listen");
         if (pcb)
         {
             tcp_close(pcb);

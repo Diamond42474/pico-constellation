@@ -4,7 +4,7 @@
 #include "stdbool.h"
 #include "stddef.h"
 
-#define HTML_MAX_CONTENTS (1024 * 4)
+#define HTML_MAX_CONTENTS (1024 * 5)
 #define HTML_MAX_PATH_LEN (1024)
 #define HTML_MAX_QUERY_LEN (1024)
 
@@ -15,15 +15,21 @@ typedef struct http_contents
     bool update;                      //< HTML page needs updated
 } http_contents_t;
 
+typedef enum
+{
+    HTTP_METHOD_UNKNOWN = 0,
+    HTTP_METHOD_GET,
+    HTTP_METHOD_POST,
+    HTTP_METHOD_PUT,
+    HTTP_METHOD_DELETE,
+} http_method_t;
+
 typedef struct http_request
 {
-    enum
-    {
-        GET,
-        POST
-    } method;
+    http_method_t method;
     char path[HTML_MAX_PATH_LEN];
     char query[HTML_MAX_QUERY_LEN];
+    char body[HTML_MAX_QUERY_LEN];
 } http_request_t;
 
 int network_init(void);
