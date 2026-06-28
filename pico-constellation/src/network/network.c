@@ -255,15 +255,13 @@ err_t tcp_server_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
 
             con_state->result_len = http_contents.length;
             // conn_state->result_len test_server_content(request, params, con_state->result, sizeof(con_state->result));
-            DEBUG_printf("Request: %s?%s\n", request, params);
-            DEBUG_printf("Result: %d\n", con_state->result_len);
 
             // Check we had enough buffer space
-            if (con_state->result_len > sizeof(con_state->result) - 1)
-            {
-                DEBUG_printf("Too much result data %d\n", con_state->result_len);
-                return tcp_close_client_connection(con_state, pcb, ERR_CLSD);
-            }
+            // if (con_state->result_len > sizeof(con_state->result) - 1)
+            // {
+            //     LOG_ERROR("Too much result data %d\n", con_state->result_len);
+            //     return tcp_close_client_connection(con_state, pcb, ERR_CLSD);
+            // }
 
             // Generate web page
             if (con_state->result_len > 0)
