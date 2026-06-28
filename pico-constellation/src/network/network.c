@@ -9,11 +9,13 @@
 #include "network/dnsserver.h"
 #include "c-logger.h"
 
+#include "ui.h"
+
 #define BSSID "pico-constellation"
 #define PASSWORD "peregrine"
 #define TCP_PORT 80
 #define DEBUG_printf LOG_DEBUG
-#define POLL_TIME_S 1
+#define POLL_TIME_S 5
 #define HTTP_GET "GET"
 #define HTTP_RESPONSE_HEADERS "HTTP/1.1 %d OK\nContent-Length: %d\nContent-Type: text/html; charset=utf-8\nConnection: close\n\n"
 #define LED_TEST_BODY "<html><body><h1>Hello from Pico Constellation.</h1><p>Led is %s</p><p><a href=\"?led=%d\">Turn led %s</a></body></html>"
@@ -53,6 +55,7 @@ static bool tcp_server_open(void *arg, const char *ap_name);
 static TCP_SERVER_T *state;
 static dhcp_server_t dhcp_server;
 static dns_server_t dns_server;
+static http_contents_t http_contents;
 
 int network_init(void)
 {
@@ -213,11 +216,6 @@ err_t tcp_server_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
     if (p->tot_len > 0)
     {
         DEBUG_printf("tcp_server_recv %d err %d\n", p->tot_len, err);
-#if 0
-        for (struct pbuf *q = p; q != NULL; q = q->next) {
-            DEBUG_printf("in: %.*s\n", q->len, q->payload);
-        }
-#endif
         // Copy the request into the buffer
         pbuf_copy_partial(p, con_state->headers, p->tot_len > sizeof(con_state->headers) - 1 ? sizeof(con_state->headers) - 1 : p->tot_len, 0);
 
@@ -244,7 +242,19 @@ err_t tcp_server_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
             }
 
             // Generate content
-            con_state->result_len = test_server_content(request, params, con_state->result, sizeof(con_state->result));
+            http_request_t http_request;
+            http_request.method = GET;
+            snprintf(http_request.path, HTML_MAX_PATH_LEN, "%s", request);
+            snprintf(http_request.query, HTML_MAX_QUERY_LEN, "%s", params);
+
+            if (ui_handle_event(&http_contents, &http_request))
+            {
+                LOG_ERROR("Failed to handle UI event");
+                return tcp_close_client_connection(con_state, pcb, ERR_CLSD);
+            }
+
+            con_state->result_len = http_contents.length;
+            // conn_state->result_len test_server_content(request, params, con_state->result, sizeof(con_state->result));
             DEBUG_printf("Request: %s?%s\n", request, params);
             DEBUG_printf("Result: %d\n", con_state->result_len);
 
@@ -284,9 +294,9 @@ err_t tcp_server_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
             }
 
             // Send the body to the client
-            if (con_state->result_len)
+            if (http_contents.length)
             {
-                err = tcp_write(pcb, con_state->result, con_state->result_len, 0);
+                err = tcp_write(pcb, http_contents.contents, http_contents.length, 0);
                 if (err != ERR_OK)
                 {
                     DEBUG_printf("failed to write result data %d\n", err);
