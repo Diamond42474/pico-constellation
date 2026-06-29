@@ -359,12 +359,12 @@ err_t tcp_server_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
 
     con->sent_len = 0;
 
-    LOG_INFO("pcb=%p", pcb);
-    LOG_INFO("sndbuf=%u", tcp_sndbuf(pcb));
-    LOG_INFO("sndqueuelen=%u", pcb->snd_queuelen);
-    LOG_INFO("header_len=%u", con->response_header_len);
-    LOG_INFO("body_len=%u", con->response_body_len);
-    LOG_INFO("Response:\n%s", con->response_headers);
+    // LOG_INFO("pcb=%p", pcb);
+    // LOG_INFO("sndbuf=%u", tcp_sndbuf(pcb));
+    // LOG_INFO("sndqueuelen=%u", pcb->snd_queuelen);
+    // LOG_INFO("header_len=%u", con->response_header_len);
+    // LOG_INFO("body_len=%u", con->response_body_len);
+    // LOG_INFO("Response:\n%s", con->response_headers);
 
     err = tcp_write(
         pcb,

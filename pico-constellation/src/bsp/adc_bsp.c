@@ -58,7 +58,7 @@ int adc_bsp_get_data(circular_buffer_t *buffer)
     {
         if(circular_buffer_push(buffer, &tmp_buffer[i]))
         {
-            LOG_ERROR("Failed to push sample to circular buffer");
+            LOG_ERROR("Failed to push %d to buffer", samples_fetched);
             return -1;
         }
     }

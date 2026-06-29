@@ -96,7 +96,7 @@ int _send(http_contents_t *contents, http_request_t *request)
 {
     if (message_index < 31)
     {
-        snprintf(messages[message_index].name, 32, "Me");
+        snprintf(messages[message_index].name, 32, pconfigFCC_CALLSIGN);
         snprintf(messages[message_index].time, 32, "unknown");
         snprintf(messages[message_index].message, 100, request->body);
         message_index++;

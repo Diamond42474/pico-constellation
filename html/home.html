@@ -140,8 +140,8 @@
       if (!t) return;
       await fetch("/send", {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ message: t })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: t })
       });
       i.value = '';
       d.textContent = 0;
