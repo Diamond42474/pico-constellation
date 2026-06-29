@@ -52,11 +52,28 @@
       background: #111;
       padding: 8px;
       border-radius: 8px;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      line-height: 1.35;
+    }
+
+    .head {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      margin-bottom: 4px;
+      flex-wrap: wrap;
     }
 
     strong {
-      display: block;
-      margin-bottom: 4px;
+      display: inline;
+      font-weight: 600;
+    }
+
+    time {
+      font-size: 0.75em;
+      opacity: 0.55;
+      white-space: nowrap;
     }
   </style>
 </head>
@@ -97,16 +114,19 @@
 
         j.slice().reverse().forEach(x => {
           const a = document.createElement('article');
+          const h = document.createElement('div');
+          h.className = 'head';
           const s = document.createElement('strong');
           s.textContent = x.name || 'Unknown';
-          a.append(s, document.createTextNode(x.text || ''));
+          h.append(s);
 
           if (x.time) {
             const t = document.createElement('time');
             t.textContent = x.time;
-            a.append(t);
+            h.append(t);
           }
 
+          a.append(h, document.createTextNode(x.text || ''));
           m.append(a);
         });
 
@@ -129,7 +149,7 @@
     };
 
     u();
-    setInterval(u, 5000);
+    setInterval(u, 10000);
   </script>
 </body>
 
