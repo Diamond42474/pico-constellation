@@ -180,6 +180,44 @@ static http_method_t parse_http_method(const char *s)
     return HTTP_METHOD_UNKNOWN;
 }
 
+static int hex(char c)
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return 0;
+}
+
+static void url_decode(char *dst, const char *src)
+{
+    while (*src)
+    {
+        if (*src == '%')
+        {
+            if (src[1] && src[2])
+            {
+                *dst++ = (hex(src[1]) << 4) | hex(src[2]);
+                src += 3;
+            }
+            else
+                break;
+        }
+        else if (*src == '+')
+        {
+            *dst++ = ' ';
+            src++;
+        }
+        else
+        {
+            *dst++ = *src++;
+        }
+    }
+    *dst = '\0';
+}
+
 static int parse_http_request(char *request, http_request_t *req)
 {
     if (!request || !req)
@@ -203,8 +241,8 @@ static int parse_http_request(char *request, http_request_t *req)
             LOG_ERROR("Body too large");
             return -1;
         }
-
-        memcpy(req->body, body, body_len + 1);
+        url_decode(req->body, body);
+        //memcpy(req->body, body, body_len + 1);
     }
 
     // Parse request line.
@@ -296,7 +334,6 @@ err_t tcp_server_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
 
     if (err != ERR_OK)
     {
-        pbuf_free(p);
         return tcp_close_client_connection(con, pcb, err);
     }
 
@@ -304,7 +341,6 @@ err_t tcp_server_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
     if (con->request_len + p->tot_len >= sizeof(con->request))
     {
         LOG_ERROR("HTTP request too large");
-        pbuf_free(p);
         return tcp_close_client_connection(con, pcb, ERR_BUF);
     }
 
