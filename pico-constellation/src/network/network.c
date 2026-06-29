@@ -319,11 +319,11 @@ err_t tcp_server_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
     con->request[con->request_len] = '\0';
 
     tcp_recved(pcb, p->tot_len);
-    pbuf_free(p);
 
     // Wait until the full HTTP request has arrived.
     if (!http_request_complete(con))
     {
+        pbuf_free(p);
         return ERR_OK;
     }
 
@@ -406,6 +406,7 @@ err_t tcp_server_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
     // Ready for another request if the connection stays open.
     con->request_len = 0;
 
+    pbuf_free(p);
     return ERR_OK;
 }
 
@@ -418,11 +419,13 @@ static err_t tcp_server_poll(void *arg, struct tcp_pcb *pcb)
 
 static void tcp_server_err(void *arg, err_t err)
 {
-    TCP_CONNECT_STATE_T *con_state = (TCP_CONNECT_STATE_T *)arg;
-    if (err != ERR_ABRT)
+    TCP_CONNECT_STATE_T *con = arg;
+
+    LOG_ERROR("tcp err %d", err);
+
+    if (con)
     {
-        LOG_ERROR("tcp_client_err_fn %d", err);
-        tcp_close_client_connection(con_state, con_state->pcb, err);
+        free(con);
     }
 }
 
@@ -431,7 +434,7 @@ static err_t tcp_server_accept(void *arg, struct tcp_pcb *client_pcb, err_t err)
     TCP_SERVER_T *state = (TCP_SERVER_T *)arg;
     if (err != ERR_OK || client_pcb == NULL)
     {
-        LOG_ERROR("failure in accept");
+        LOG_ERROR("failure in accept %d %u", err, client_pcb);
         return ERR_VAL;
     }
     LOG_DEBUG("client connected");
