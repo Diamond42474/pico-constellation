@@ -96,16 +96,19 @@ int _update(http_contents_t *contents, http_request_t *request)
 
 int _send(http_contents_t *contents, http_request_t *request)
 {
-    if (message_index < 31)
+    if (message_index >= 32)
     {
-        snprintf(messages[message_index].name, 32, pconfigFCC_CALLSIGN);
-        snprintf(messages[message_index].time, 32, "unknown");
-        snprintf(messages[message_index].message, 100, request->body);
-
-        pc_send_message(pc_handle, 0x00, messages[message_index].message, strlen(messages[message_index].message));
-        message_index++;
+        message_index = 0;
     }
+
+    snprintf(messages[message_index].name, 32, pconfigFCC_CALLSIGN);
+    snprintf(messages[message_index].time, 32, "unknown");
+    snprintf(messages[message_index].message, 100, request->body);
+
+    pc_send_message(pc_handle, 0x00, messages[message_index].message, strlen(messages[message_index].message));
+    message_index++;
     contents->update = false;
     contents->length = 0;
+    
     return 0;
 }

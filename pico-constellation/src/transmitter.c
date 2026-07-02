@@ -3,6 +3,7 @@
 #include "c-logger.h"
 #include "HAL_time.h"
 #include "peregrine-constellation.h"
+#include <string.h>
 static HAL_timer_t intermittent_timer;
 
 void data_callback(const uint8_t *data, size_t len, uint8_t src_addr)
@@ -30,9 +31,10 @@ int main()
         goto failed;
     }
 
-    char test_data[] = "Peregrine Constellation Test!";
+    char test_data[16];
 
-    HAL_timer_start(&intermittent_timer, 30 * ONE_SECOND); // Start timer for intermittent sending
+    HAL_timer_start(&intermittent_timer, 3 * ONE_SECOND); // Start timer for intermittent sending
+    int count = 0;
     while (true)
     {
         pc_task(handle);
@@ -40,7 +42,8 @@ int main()
         {
             HAL_timer_reset(&intermittent_timer); // Reset timer for next send
             LOG_INFO("Sending test data...");
-            if (pc_send_message(handle, 0x02, test_data, sizeof(test_data) -1)) // Send test data to address 0x02
+            snprintf(test_data, sizeof(test_data), "KM7DEJ%d", count++);
+            if (pc_send_message(handle, 0x02, test_data, strlen(test_data))) // Send test data to address 0x02
             {
                 LOG_ERROR("Failed to send test data");
             }

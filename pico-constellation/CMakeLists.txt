@@ -14,9 +14,9 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Ofast")
 # Source files
 add_executable(${PROJECT_NAME}
 	#src/transmitter.c
-    #src/receiver.c
+    src/receiver.c
     #src/test.c
-    src/main.c
+    #src/main.c
 
     # Drivers
     src/drivers/ad9833.c
