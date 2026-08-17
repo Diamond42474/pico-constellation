@@ -1,19 +1,40 @@
 import serial
 import struct
 
-ser = serial.Serial('/dev/ttyACM0', timeout=10)
+PORT = "/dev/ttyACM1"       # Change this to your Pico's COM port
+BAUD = 115200       # Ignored by USB CDC, but required by pyserial
+RECORD_SIZE = 5
 
-# Read header (8 bytes)
-header = ser.read(8)
-sample_rate, total_samples = struct.unpack('<II', header)
+ser = serial.Serial(PORT, BAUD, timeout=1)
 
-print(f"Sample rate: {sample_rate}")
-print(f"Total samples: {total_samples}")
+print("Waiting for data...")
 
-# Read sample data
-raw = ser.read(total_samples * 2)
+buffer = bytearray()
 
-with open("capture.raw", "wb") as f:
-    f.write(raw)
+try:
+    while True:
+        data = ser.read(4096)
 
-print("Saved to capture.raw")
+        if data:
+            buffer.extend(data)
+
+        while len(buffer) >= RECORD_SIZE:
+            record = buffer[:RECORD_SIZE]
+            del buffer[:RECORD_SIZE]
+
+            sample, filtered_1200, filtered_2200, metric = struct.unpack(
+                "<HBBB", record
+            )
+
+            print(
+                f"sample={sample:5d} "
+                f"1200={filtered_1200:3d} "
+                f"2200={filtered_2200:3d} "
+                f"metric={metric:3d}"
+            )
+
+except KeyboardInterrupt:
+    print("\nStopping...")
+
+finally:
+    ser.close()
