@@ -7,6 +7,7 @@
 
 #include <stdio.h>
 #include <stdint.h>
+#include <math.h>
 #include "pico/stdlib.h"
 #include "c-logger.h"
 #include "peregrine-constellation.h"
@@ -15,9 +16,12 @@
 #if pconfig_DEBUG_RECORDING_ENABLED
 
 #define DEBUG_BUFFER_SIZE 4096
+#define FLOAT_MAX (10.0f) // Maximum expected amplitude for normalization
+#define SYNC_WORD (0xABCD)  // Sync word for identifying the start of a record
 
 typedef struct __attribute__((packed))
 {
+    uint16_t sync;
     uint16_t sample;
     uint8_t filtered_1200;
     uint8_t filtered_2200;
@@ -32,13 +36,16 @@ static size_t debug_buffer_index = 0;
  */
 static uint8_t amplitude_to_u8(float value)
 {
-    if (value <= 0.0f)
+    const float min = -FLOAT_MAX / 2.0f;
+    const float max =  FLOAT_MAX / 2.0f;
+
+    if (value <= min)
         return 0;
 
-    if (value >= 1.0f)
+    if (value >= max)
         return 255;
 
-    return (uint8_t)(value * 255.0f);
+    return (uint8_t)(((value - min) / (max - min)) * 255.0f);
 }
 
 /**
@@ -60,6 +67,7 @@ int debug_handle_recording(
     float filtered_2200,
     float metric)
 {
+    debug_buffer[debug_buffer_index].sync = SYNC_WORD;
     debug_buffer[debug_buffer_index].sample = sample;
     debug_buffer[debug_buffer_index].filtered_1200 =
         amplitude_to_u8(filtered_1200);
@@ -99,9 +107,9 @@ int main(void)
 
     stdio_init_all();
 
-    sleep_ms(2000); // Wait for USB to initialize
+    log_init(LOG_LEVEL_FATAL); // Logging output will interfere with recording, so set to error to suppress output
 
-    log_init(LOG_LEVEL_ERROR); // Logging output will interfere with recording, so set to error to suppress output
+    sleep_ms(2000); // Wait for USB to initialize
 
     LOG_INFO("Booting Pico Constellation Recorder...");
 

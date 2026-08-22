@@ -55,4 +55,4 @@ build/
 docs/
 .vscode/
 .idea/
-venv/
+*venv/
