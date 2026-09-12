@@ -51,3 +51,15 @@ count; **Stop recording** preserves any samples captured so far.
 CSV files are written to `scripts/recorded_data/` with a timestamped filename.
 They contain `timestamp_unix`, `sample`, `filtered_1200`, `filtered_2200`, and
 `metric` columns.
+
+To create analysis files from a recording, pass its CSV path to
+`center-shift.py`:
+
+```sh
+python3 scripts/center-shift.py scripts/recorded_data/recording_YYYYMMDD_HHMMSS.csv
+```
+
+It writes the unmodified 16-bit ADC samples to `capture.raw` and centered
+16-bit mono PCM audio to `capture_centered.wav`, both beside the input CSV. The
+WAV sample rate defaults to 26,250 Hz and can be overridden with
+`--sample-rate`.

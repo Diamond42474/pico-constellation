@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
 DEVICE = "/dev/ttyACM0"
 BAUD_RATE = 115200
 
-ADC_SAMPLE_RATE = 48000
+ADC_SAMPLE_RATE = 26250
 
 SYNC_WORD = 0xABCD
 SYNC_BYTES = struct.pack("<H", SYNC_WORD)
