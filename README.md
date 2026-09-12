@@ -4,9 +4,11 @@ A digital -> analog / analog -> digital library intended for encoding and decodi
 
 ## Recording Pico debug data
 
-`scripts/record.py` displays the debug-data stream from a Raspberry Pi Pico 2 W
-and can save a fixed number of incoming records to CSV. It plots the raw ADC
-sample, the 1200 Hz and 2200 Hz filtered values, and the metric while it runs.
+`scripts/record.py` displays the raw ADC-sample stream from a Raspberry Pi Pico
+2 W and can save a fixed number of incoming samples to CSV. The firmware sends
+each sample as a 4-byte little-endian record: a `0xABCD` synchronization word
+followed by one unsigned 16-bit ADC sample. Build and flash the matching
+firmware before starting the Python recorder.
 
 ### Prepare the firmware
 
@@ -49,8 +51,7 @@ is decimated for display. The recorder stops automatically at the requested
 count; **Stop recording** preserves any samples captured so far.
 
 CSV files are written to `scripts/recorded_data/` with a timestamped filename.
-They contain `timestamp_unix`, `sample`, `filtered_1200`, `filtered_2200`, and
-`metric` columns.
+They contain `timestamp_unix` and `sample` columns.
 
 To create analysis files from a recording, pass its CSV path to
 `center-shift.py`:

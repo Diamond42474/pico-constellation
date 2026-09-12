@@ -29,7 +29,7 @@ ADC_SAMPLE_RATE = 26250
 SYNC_WORD = 0xABCD
 SYNC_BYTES = struct.pack("<H", SYNC_WORD)
 
-RECORD_SIZE = 7
+RECORD_SIZE = 4
 MAX_DATAPOINTS = 1000
 
 GRAPH_SKIP = 100  # Number of records to skip between graph updates
@@ -75,9 +75,6 @@ class RecordingManager:
             self._writer.writerow([
                 "timestamp_unix",
                 "sample",
-                "filtered_1200",
-                "filtered_2200",
-                "metric",
             ])
             self._target_count = target_count
             self._sample_count = 0
@@ -85,14 +82,14 @@ class RecordingManager:
             self._last_message = f"Recording to {path.name}"
             return path
 
-    def write_record(self, record):
+    def write_record(self, sample):
         """Write one incoming record and close the file at the requested count."""
 
         with self._lock:
             if not self._active:
                 return
 
-            self._writer.writerow([time.time(), *record])
+            self._writer.writerow([time.time(), sample])
             self._sample_count += 1
 
             if self._sample_count >= self._target_count:
@@ -165,11 +162,8 @@ def read_record(ser, buffer):
 
         uint16 sync
         uint16 sample
-        uint8  filtered_1200
-        uint8  filtered_2200
-        uint8  metric
 
-    Total: 7 bytes
+    Total: 4 bytes
 
     The function searches for SYNC_WORD in the byte stream and
     discards any bytes before it.
@@ -204,6 +198,7 @@ def read_record(ser, buffer):
 
         # Discard anything before the sync word.
         if sync_index > 0:
+            print(f"Discarding {sync_index} bytes before sync word")
             del buffer[:sync_index]
 
         # We now know buffer[0:2] is the sync word.
@@ -222,16 +217,14 @@ def read_record(ser, buffer):
         record = bytes(buffer[:RECORD_SIZE])
         del buffer[:RECORD_SIZE]
 
-        sync, sample, filtered_1200, filtered_2200, metric = (
-            struct.unpack("<HHBBB", record)
-        )
+        sync, sample = struct.unpack("<HH", record)
 
         # This should always be true because we found SYNC_BYTES,
         # but verify it anyway.
         if sync != SYNC_WORD:
             continue
 
-        return sample, filtered_1200, filtered_2200, metric
+        return sample
 
 
 def serial_reader():
@@ -277,7 +270,7 @@ def serial_reader():
 
 
 def graph_data():
-    """Display the four record fields and recording controls in real time."""
+    """Display raw ADC samples and recording controls in real time."""
 
     app = pg.mkQApp("Signal Data")
 
@@ -310,21 +303,10 @@ def graph_data():
     layout.addWidget(graph_widget, 1)
 
     plots = []
-    data = [[], [], [], []]
+    data = []
 
-    names = [
-        "Sample",
-        "Filtered 1200",
-        "Filtered 2200",
-        "Metric"
-    ]
-
-    for i, name in enumerate(names):
-        plot = graph_widget.addPlot(
-            row=i,
-            col=0,
-            title=name
-        )
+    for i, name in enumerate(["Raw ADC sample"]):
+        plot = graph_widget.addPlot(row=i, col=0, title=name)
 
         plot.showGrid(x=True, y=True)
 
@@ -342,22 +324,12 @@ def graph_data():
             except queue.Empty:
                 break
 
-            sample, filtered_1200, filtered_2200, metric = record
+            data.append(record)
 
-            values = [
-                sample,
-                filtered_1200,
-                filtered_2200,
-                metric
-            ]
+            if len(data) > MAX_DATAPOINTS:
+                data = data[-MAX_DATAPOINTS:]
 
-            for i, value in enumerate(values):
-                data[i].append(value)
-
-                if len(data[i]) > MAX_DATAPOINTS:
-                    data[i] = data[i][-MAX_DATAPOINTS:]
-
-                plots[i].setData(data[i])
+            plots[0].setData(data)
 
         active, captured, target, message = recording.status()
         start_button.setEnabled(not active)
