@@ -1,3 +1,53 @@
 # Pico Constellation
 
 A digital -> analog / analog -> digital library intended for encoding and decoding data over analog audio systems. i.e. analog radios.
+
+## Recording Pico debug data
+
+`scripts/record.py` displays the debug-data stream from a Raspberry Pi Pico 2 W
+and can save a fixed number of incoming records to CSV. It plots the raw ADC
+sample, the 1200 Hz and 2200 Hz filtered values, and the metric while it runs.
+
+### Prepare the firmware
+
+1. In [`lib/peregrine-constellation/Core/Inc/interface/pconfig.h`](lib/peregrine-constellation/Core/Inc/interface/pconfig.h), enable debug recording:
+
+   ```c
+   #define pconfig_DEBUG_RECORDING_ENABLED (1)
+   ```
+
+2. Build the Pico application with the recorder entry point. In
+   [`pico-constellation/CMakeLists.txt`](pico-constellation/CMakeLists.txt), the
+   `src/recorder.c` option is the active source-file selection. Use this option
+   when building the firmware intended to emit recording data, then flash the
+   resulting image to the Pico.
+
+   The recorder writes binary records to USB serial in batches, so the first
+   records may not appear until the firmware has filled its buffer.
+
+### Run the desktop recorder
+
+Install the Python dependencies once:
+
+```sh
+python3 -m pip install -r scripts/requirements.txt
+```
+
+With the Pico connected as `/dev/ttyACM0`, run:
+
+```sh
+python3 scripts/record.py
+```
+
+If the device uses another serial path, change `DEVICE` near the top of
+`scripts/record.py`. The application waits for the device if it is not yet
+connected and reconnects after a disconnect.
+
+Enter the desired number of samples in **Samples to record**, then click
+**Start recording**. Every incoming record is captured, even though the graph
+is decimated for display. The recorder stops automatically at the requested
+count; **Stop recording** preserves any samples captured so far.
+
+CSV files are written to `scripts/recorded_data/` with a timestamped filename.
+They contain `timestamp_unix`, `sample`, `filtered_1200`, `filtered_2200`, and
+`metric` columns.
