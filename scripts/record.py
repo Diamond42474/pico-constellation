@@ -1,13 +1,24 @@
+import csv
 import os
-import time
-import struct
 import queue
+import struct
 import threading
+import time
+from datetime import datetime
+from pathlib import Path
 
 import serial
 import pyqtgraph as pg
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import (
+    QApplication,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 DEVICE = "/dev/ttyACM0"
@@ -22,12 +33,98 @@ RECORD_SIZE = 7
 MAX_DATAPOINTS = 1000
 
 GRAPH_SKIP = 100  # Number of records to skip between graph updates
+RECORDED_DATA_DIRECTORY = Path(__file__).parent / "recorded_data"
 
 
-# Global queue containing:
-# (sample, filtered_1200, filtered_2200, metric)
-record_queue = queue.Queue()
 graph_queue = queue.Queue()
+
+
+class RecordingManager:
+    """Safely write a fixed number of records from the serial reader."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._file = None
+        self._writer = None
+        self._target_count = 0
+        self._sample_count = 0
+        self._active = False
+        self._last_message = "Ready to record."
+
+    def start(self, target_count):
+        """Open a new CSV file and begin recording target_count records."""
+
+        with self._lock:
+            if self._active:
+                raise RuntimeError("A recording is already in progress.")
+
+            RECORDED_DATA_DIRECTORY.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            path = RECORDED_DATA_DIRECTORY / f"recording_{timestamp}.csv"
+
+            # Avoid replacing a file if recordings are started twice in one second.
+            suffix = 1
+            while path.exists():
+                path = RECORDED_DATA_DIRECTORY / (
+                    f"recording_{timestamp}_{suffix}.csv"
+                )
+                suffix += 1
+
+            self._file = path.open("w", newline="", encoding="utf-8")
+            self._writer = csv.writer(self._file)
+            self._writer.writerow([
+                "timestamp_unix",
+                "sample",
+                "filtered_1200",
+                "filtered_2200",
+                "metric",
+            ])
+            self._target_count = target_count
+            self._sample_count = 0
+            self._active = True
+            self._last_message = f"Recording to {path.name}"
+            return path
+
+    def write_record(self, record):
+        """Write one incoming record and close the file at the requested count."""
+
+        with self._lock:
+            if not self._active:
+                return
+
+            self._writer.writerow([time.time(), *record])
+            self._sample_count += 1
+
+            if self._sample_count >= self._target_count:
+                self._finish_locked("Recording complete")
+
+    def stop(self):
+        """Stop a recording early, keeping the samples already captured."""
+
+        with self._lock:
+            if self._active:
+                self._finish_locked("Recording stopped")
+
+    def status(self):
+        """Return a thread-safe snapshot for the GUI."""
+
+        with self._lock:
+            return (
+                self._active,
+                self._sample_count,
+                self._target_count,
+                self._last_message,
+            )
+
+    def _finish_locked(self, message):
+        self._file.close()
+        self._file = None
+        self._writer = None
+        self._active = False
+        self._last_message = message
+
+
+recording = RecordingManager()
 
 
 def wait_for_device():
@@ -157,8 +254,9 @@ def serial_reader():
             while True:
                 record = read_record(ser, buffer)
 
-                # Uncomment if you want every record in the queue.
-                # record_queue.put(record)
+                # Recording receives every incoming record, independent of the
+                # graph's decimation rate.
+                recording.write_record(record)
 
                 if skip_index == GRAPH_SKIP:
                     graph_queue.put(record)
@@ -179,14 +277,37 @@ def serial_reader():
 
 
 def graph_data():
-    """Display the four record fields in real time."""
+    """Display the four record fields and recording controls in real time."""
 
     app = pg.mkQApp("Signal Data")
 
-    win = pg.GraphicsLayoutWidget()
+    win = QWidget()
 
     win.setWindowTitle("Signal Data")
     win.resize(1200, 800)
+
+    layout = QVBoxLayout(win)
+    controls = QHBoxLayout()
+
+    controls.addWidget(QLabel("Samples to record:"))
+    sample_count = QSpinBox()
+    sample_count.setRange(1, 10_000_000)
+    sample_count.setValue(10_000)
+    sample_count.setSingleStep(1_000)
+    controls.addWidget(sample_count)
+
+    start_button = QPushButton("Start recording")
+    stop_button = QPushButton("Stop recording")
+    stop_button.setEnabled(False)
+    controls.addWidget(start_button)
+    controls.addWidget(stop_button)
+
+    status_label = QLabel("Ready to record.")
+    controls.addWidget(status_label, 1)
+    layout.addLayout(controls)
+
+    graph_widget = pg.GraphicsLayoutWidget()
+    layout.addWidget(graph_widget, 1)
 
     plots = []
     data = [[], [], [], []]
@@ -199,7 +320,7 @@ def graph_data():
     ]
 
     for i, name in enumerate(names):
-        plot = win.addPlot(
+        plot = graph_widget.addPlot(
             row=i,
             col=0,
             title=name
@@ -238,6 +359,25 @@ def graph_data():
 
                 plots[i].setData(data[i])
 
+        active, captured, target, message = recording.status()
+        start_button.setEnabled(not active)
+        stop_button.setEnabled(active)
+
+        if active:
+            status_label.setText(f"Recording: {captured} / {target} samples")
+        else:
+            status_label.setText(message)
+
+    def start_recording():
+        try:
+            path = recording.start(sample_count.value())
+            status_label.setText(f"Recording to {path.name}")
+        except (OSError, RuntimeError) as error:
+            status_label.setText(f"Could not start recording: {error}")
+
+    start_button.clicked.connect(start_recording)
+    stop_button.clicked.connect(recording.stop)
+
     # Parent the timer to the window so it stays alive.
     timer = pg.QtCore.QTimer(win)
 
@@ -249,6 +389,7 @@ def graph_data():
 
     print("Graph started.")
 
+    app.aboutToQuit.connect(recording.stop)
     app.exec()
 
 
