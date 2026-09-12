@@ -327,7 +327,7 @@ def graph_data():
             data.append(record)
 
             if len(data) > MAX_DATAPOINTS:
-                data = data[-MAX_DATAPOINTS:]
+                del data[:-MAX_DATAPOINTS]
 
             plots[0].setData(data)
 
