@@ -6,9 +6,10 @@ A digital -> analog / analog -> digital library intended for encoding and decodi
 
 `scripts/record.py` displays the raw ADC-sample stream from a Raspberry Pi Pico
 2 W and can save a fixed number of incoming samples to CSV. The firmware sends
-each sample as a 4-byte little-endian record: a `0xABCD` synchronization word
-followed by one unsigned 16-bit ADC sample. Build and flash the matching
-firmware before starting the Python recorder.
+1,024-sample frames with a 32-bit marker, sequence number, sample count, and
+CRC32. `record.py` validates every frame and reports sequence gaps or corrupt
+frames before recording their samples. Build and flash the matching firmware
+before starting the Python recorder.
 
 ### Prepare the firmware
 
@@ -62,5 +63,5 @@ python3 scripts/center-shift.py scripts/recorded_data/recording_YYYYMMDD_HHMMSS.
 
 It writes the unmodified 16-bit ADC samples to `capture.raw` and centered
 16-bit mono PCM audio to `capture_centered.wav`, both beside the input CSV. The
-WAV sample rate defaults to 26,250 Hz and can be overridden with
+WAV sample rate defaults to 48,000 Hz and can be overridden with
 `--sample-rate`.

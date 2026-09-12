@@ -4,6 +4,7 @@ import queue
 import struct
 import threading
 import time
+import zlib
 from datetime import datetime
 from pathlib import Path
 
@@ -24,12 +25,16 @@ from PyQt6.QtWidgets import (
 DEVICE = "/dev/ttyACM0"
 BAUD_RATE = 115200
 
-ADC_SAMPLE_RATE = 26250
+ADC_SAMPLE_RATE = 48000
 
-SYNC_WORD = 0xABCD
-SYNC_BYTES = struct.pack("<H", SYNC_WORD)
+FRAME_MAGIC = 0xA5C3F17E
+FRAME_MAGIC_BYTES = struct.pack("<I", FRAME_MAGIC)
+FRAME_SAMPLE_COUNT = 1024
+FRAME_HEADER_FORMAT = "<IHH"
+FRAME_HEADER_SIZE = struct.calcsize(FRAME_HEADER_FORMAT)
+FRAME_CRC_SIZE = 4
+FRAME_SIZE = FRAME_HEADER_SIZE + (FRAME_SAMPLE_COUNT * 2) + FRAME_CRC_SIZE
 
-RECORD_SIZE = 4
 MAX_DATAPOINTS = 1000
 
 GRAPH_SKIP = 100  # Number of records to skip between graph updates
@@ -82,15 +87,23 @@ class RecordingManager:
             self._last_message = f"Recording to {path.name}"
             return path
 
-    def write_record(self, sample):
-        """Write one incoming record and close the file at the requested count."""
+    def write_samples(self, samples):
+        """Write one received frame, stopping at the requested sample count."""
 
         with self._lock:
             if not self._active:
                 return
 
-            self._writer.writerow([time.time(), sample])
-            self._sample_count += 1
+            remaining = self._target_count - self._sample_count
+            samples_to_write = samples[:remaining]
+            first_timestamp = time.time() - (
+                (len(samples_to_write) - 1) / ADC_SAMPLE_RATE
+            )
+            self._writer.writerows(
+                (first_timestamp + (index / ADC_SAMPLE_RATE), sample)
+                for index, sample in enumerate(samples_to_write)
+            )
+            self._sample_count += len(samples_to_write)
 
             if self._sample_count >= self._target_count:
                 self._finish_locked("Recording complete")
@@ -154,77 +167,76 @@ def connect_serial():
             time.sleep(0.5)
 
 
-def read_record(ser, buffer):
+def read_frame(ser, buffer):
     """
-    Read and synchronize to the next complete record.
+    Read, synchronize, and validate the next complete sample frame.
 
-    Record format:
+    Frame format:
 
-        uint16 sync
-        uint16 sample
+        uint32 magic (0xA5C3F17E)
+        uint16 sequence
+        uint16 sample_count (1024)
+        uint16 samples[1024]
+        uint32 crc32
 
-    Total: 4 bytes
-
-    The function searches for SYNC_WORD in the byte stream and
-    discards any bytes before it.
+    The CRC covers everything after magic through the sample payload. Invalid
+    frames are ignored and the reader scans again for the next frame marker.
     """
 
     while True:
-
-        # Read more data if we don't have enough to search for
-        # the sync word.
-        if len(buffer) < 2:
-            data = ser.read(64)
+        if len(buffer) < len(FRAME_MAGIC_BYTES):
+            data = ser.read(4096)
 
             if not data:
-                raise serial.SerialException(
-                    "Serial device disconnected"
-                )
+                raise serial.SerialException("Serial device disconnected")
 
             buffer.extend(data)
 
-        # Search for the sync word.
-        sync_index = buffer.find(SYNC_BYTES)
+        magic_index = buffer.find(FRAME_MAGIC_BYTES)
 
-        if sync_index == -1:
-            # No sync word found.
-
-            # Keep the final byte in case it is the first half
-            # of the sync word.
-            if len(buffer) > 1:
-                del buffer[:-1]
-
+        if magic_index == -1:
+            # Preserve a partial 32-bit marker for the next read.
+            if len(buffer) > len(FRAME_MAGIC_BYTES) - 1:
+                del buffer[:-(len(FRAME_MAGIC_BYTES) - 1)]
             continue
 
-        # Discard anything before the sync word.
-        if sync_index > 0:
-            print(f"Discarding {sync_index} bytes before sync word")
-            del buffer[:sync_index]
+        if magic_index > 0:
+            print(f"Discarding {magic_index} bytes before frame marker")
+            del buffer[:magic_index]
 
-        # We now know buffer[0:2] is the sync word.
-        # Wait until the complete record is available.
-        while len(buffer) < RECORD_SIZE:
-            data = ser.read(RECORD_SIZE - len(buffer))
+        while len(buffer) < FRAME_SIZE:
+            data = ser.read(FRAME_SIZE - len(buffer))
 
             if not data:
-                raise serial.SerialException(
-                    "Serial device disconnected"
-                )
+                raise serial.SerialException("Serial device disconnected")
 
             buffer.extend(data)
 
-        # Extract the complete record.
-        record = bytes(buffer[:RECORD_SIZE])
-        del buffer[:RECORD_SIZE]
+        frame = bytes(buffer[:FRAME_SIZE])
+        magic, sequence, sample_count = struct.unpack_from(
+            FRAME_HEADER_FORMAT,
+            frame,
+        )
+        expected_crc = struct.unpack_from("<I", frame, FRAME_SIZE - FRAME_CRC_SIZE)[0]
+        actual_crc = zlib.crc32(frame[4:-FRAME_CRC_SIZE]) & 0xFFFFFFFF
 
-        sync, sample = struct.unpack("<HH", record)
-
-        # This should always be true because we found SYNC_BYTES,
-        # but verify it anyway.
-        if sync != SYNC_WORD:
+        if (
+            magic != FRAME_MAGIC
+            or sample_count != FRAME_SAMPLE_COUNT
+            or actual_crc != expected_crc
+        ):
+            print("Discarding invalid sample frame")
+            # Retain the rest of this potential frame for marker resynchronization.
+            del buffer[:1]
             continue
 
-        return sample
+        del buffer[:FRAME_SIZE]
+        samples = struct.unpack_from(
+            f"<{FRAME_SAMPLE_COUNT}H",
+            frame,
+            FRAME_HEADER_SIZE,
+        )
+        return sequence, samples
 
 
 def serial_reader():
@@ -242,20 +254,33 @@ def serial_reader():
         buffer = bytearray()
 
         skip_index = 0
+        previous_sequence = None
 
         try:
             while True:
-                record = read_record(ser, buffer)
+                sequence, samples = read_frame(ser, buffer)
 
-                # Recording receives every incoming record, independent of the
-                # graph's decimation rate.
-                recording.write_record(record)
+                if (
+                    previous_sequence is not None
+                    and sequence != (previous_sequence + 1) & 0xFFFF
+                ):
+                    print(
+                        "Frame sequence gap: "
+                        f"expected {(previous_sequence + 1) & 0xFFFF}, "
+                        f"received {sequence}"
+                    )
+                previous_sequence = sequence
 
-                if skip_index == GRAPH_SKIP:
-                    graph_queue.put(record)
-                    skip_index = 0
+                # Recording receives validated frame payloads independent of
+                # the graph's decimation rate.
+                recording.write_samples(samples)
 
-                skip_index += 1
+                for sample in samples:
+                    if skip_index == GRAPH_SKIP:
+                        graph_queue.put(sample)
+                        skip_index = 0
+
+                    skip_index += 1
 
         except (serial.SerialException, OSError) as e:
             print(f"Disconnected: {e}")

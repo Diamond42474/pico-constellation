@@ -8,7 +8,7 @@ from array import array
 from pathlib import Path
 
 
-DEFAULT_SAMPLE_RATE = 26_250
+DEFAULT_SAMPLE_RATE = 48_000
 ADC_CENTER = 2_048
 
 
