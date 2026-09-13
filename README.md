@@ -6,10 +6,10 @@ A digital -> analog / analog -> digital library intended for encoding and decodi
 
 `scripts/record.py` displays the raw ADC-sample stream from a Raspberry Pi Pico
 2 W and can save a fixed number of incoming samples to CSV. The firmware sends
-1,024-sample frames with a 32-bit marker, sequence number, sample count, and
-CRC32. `record.py` validates every frame and reports sequence gaps or corrupt
-frames before recording their samples. Build and flash the matching firmware
-before starting the Python recorder.
+1,024-sample frames, each containing a 32-bit marker followed directly by the
+raw unsigned 16-bit samples. The marker lets `record.py` find the first frame
+after connecting; USB CDC supplies the ordered, reliable transport. Build and
+flash the matching firmware before starting the Python recorder.
 
 ### Prepare the firmware
 

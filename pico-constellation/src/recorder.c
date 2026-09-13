@@ -20,38 +20,11 @@
 typedef struct __attribute__((packed))
 {
     uint32_t magic;
-    uint16_t sequence;
-    uint16_t sample_count;
     uint16_t samples[FRAME_SAMPLE_COUNT];
-    uint32_t crc32;
 } debug_frame_t;
 
 static debug_frame_t debug_frame;
 static size_t sample_index = 0;
-static uint16_t frame_sequence = 0;
-
-/**
- * @brief Calculate an IEEE CRC-32 for frame validation on the host.
- */
-static uint32_t calculate_crc32(const uint8_t *data, size_t length)
-{
-    uint32_t crc = 0xFFFFFFFFu;
-
-    while (length-- > 0)
-    {
-        crc ^= *data++;
-
-        for (uint8_t bit = 0; bit < 8; bit++)
-        {
-            if (crc & 1u)
-                crc = (crc >> 1) ^ 0xEDB88320u;
-            else
-                crc >>= 1;
-        }
-    }
-
-    return ~crc;
-}
 
 /**
  * @brief Record one raw ADC sample.
@@ -60,13 +33,11 @@ static uint32_t calculate_crc32(const uint8_t *data, size_t length)
  *
  * Frame format:
  *   uint32_t magic
- *   uint16_t sequence
- *   uint16_t sample_count
  *   uint16_t samples[1024]
- *   uint32_t crc32 (sequence, count, and samples)
  *
- * A frame is emitted for every 1024 samples. The 32-bit marker, sequence
- * number, and CRC let the host reliably find and validate frame boundaries.
+ * A frame is emitted for every 1024 samples. USB CDC provides reliable,
+ * ordered delivery, so the marker is only used to find frame boundaries when
+ * the host starts reading in the middle of a frame.
  */
 int debug_handle_recording(uint16_t sample)
 {
@@ -75,13 +46,6 @@ int debug_handle_recording(uint16_t sample)
     if (sample_index >= FRAME_SAMPLE_COUNT)
     {
         debug_frame.magic = FRAME_MAGIC;
-        debug_frame.sequence = frame_sequence++;
-        debug_frame.sample_count = FRAME_SAMPLE_COUNT;
-        debug_frame.crc32 = calculate_crc32(
-            (const uint8_t *)&debug_frame.sequence,
-            sizeof(debug_frame.sequence) +
-            sizeof(debug_frame.sample_count) +
-            sizeof(debug_frame.samples));
 
         fwrite(
             &debug_frame,
