@@ -4,6 +4,7 @@ import queue
 import struct
 import threading
 import time
+import zlib
 from datetime import datetime
 from pathlib import Path
 
@@ -29,7 +30,10 @@ ADC_SAMPLE_RATE = 48000
 FRAME_MAGIC = 0xA5C3F17E
 FRAME_MAGIC_BYTES = struct.pack("<I", FRAME_MAGIC)
 FRAME_SAMPLE_COUNT = 1024
-FRAME_SIZE = len(FRAME_MAGIC_BYTES) + (FRAME_SAMPLE_COUNT * 2)
+FRAME_HEADER_FORMAT = "<IHH"
+FRAME_HEADER_SIZE = struct.calcsize(FRAME_HEADER_FORMAT)
+FRAME_CRC_SIZE = 4
+FRAME_SIZE = FRAME_HEADER_SIZE + (FRAME_SAMPLE_COUNT * 2) + FRAME_CRC_SIZE
 
 MAX_DATAPOINTS = 4800
 
@@ -165,15 +169,18 @@ def connect_serial():
 
 def read_frame(ser, buffer):
     """
-    Read and synchronize to the next complete sample frame.
+    Read, synchronize, and validate the next complete sample frame.
 
     Frame format:
 
         uint32 magic (0xA5C3F17E)
+        uint16 sequence
+        uint16 sample_count (1024)
         uint16 samples[1024]
+        uint32 crc32
 
-    USB CDC is an ordered, reliable byte stream. The marker is only needed to
-    find the first complete frame after connecting or reconnecting.
+    The CRC covers everything after magic through the sample payload. Invalid
+    frames are ignored and the reader scans again for the next frame marker.
     """
 
     while True:
@@ -206,13 +213,30 @@ def read_frame(ser, buffer):
             buffer.extend(data)
 
         frame = bytes(buffer[:FRAME_SIZE])
+        magic, sequence, sample_count = struct.unpack_from(
+            FRAME_HEADER_FORMAT,
+            frame,
+        )
+        expected_crc = struct.unpack_from("<I", frame, FRAME_SIZE - FRAME_CRC_SIZE)[0]
+        actual_crc = zlib.crc32(frame[4:-FRAME_CRC_SIZE]) & 0xFFFFFFFF
+
+        if (
+            magic != FRAME_MAGIC
+            or sample_count != FRAME_SAMPLE_COUNT
+            or actual_crc != expected_crc
+        ):
+            print("Discarding invalid sample frame")
+            # Retain the rest of this potential frame for marker resynchronization.
+            del buffer[:1]
+            continue
+
         del buffer[:FRAME_SIZE]
         samples = struct.unpack_from(
             f"<{FRAME_SAMPLE_COUNT}H",
             frame,
-            len(FRAME_MAGIC_BYTES),
+            FRAME_HEADER_SIZE,
         )
-        return samples
+        return sequence, samples
 
 
 def serial_reader():
@@ -230,11 +254,24 @@ def serial_reader():
         buffer = bytearray()
 
         skip_index = 0
+        previous_sequence = None
+
         try:
             while True:
-                samples = read_frame(ser, buffer)
+                sequence, samples = read_frame(ser, buffer)
 
-                # Recording receives complete frame payloads independent of
+                if (
+                    previous_sequence is not None
+                    and sequence != (previous_sequence + 1) & 0xFFFF
+                ):
+                    print(
+                        "Frame sequence gap: "
+                        f"expected {(previous_sequence + 1) & 0xFFFF}, "
+                        f"received {sequence}"
+                    )
+                previous_sequence = sequence
+
+                # Recording receives validated frame payloads independent of
                 # the graph's decimation rate.
                 recording.write_samples(samples)
 
