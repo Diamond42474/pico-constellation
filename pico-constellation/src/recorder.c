@@ -15,81 +15,18 @@
 
 #if pconfig_DEBUG_RECORDING_ENABLED
 
-#define DEBUG_BUFFER_SIZE 4096
-#define FLOAT_MAX (10.0f) // Maximum expected amplitude for normalization
-#define SYNC_WORD (0xABCD)  // Sync word for identifying the start of a record
+#define SYNC_WORD (0xABCD) // Sync word for identifying the start of a record
 
 typedef struct __attribute__((packed))
 {
-    uint16_t sync;
+    uint32_t sync;
     uint16_t sample;
-    uint8_t filtered_1200;
-    uint8_t filtered_2200;
-    uint8_t metric;
 } debug_record_t;
 
-static debug_record_t debug_buffer[DEBUG_BUFFER_SIZE];
-static size_t debug_buffer_index = 0;
-
-/**
- * @brief Convert a normalized amplitude value (0.0 to 1.0) to 8-bit.
- */
-static uint8_t amplitude_to_u8(float value)
-{
-    const float min = -FLOAT_MAX / 2.0f;
-    const float max =  FLOAT_MAX / 2.0f;
-
-    if (value <= min)
-        return 0;
-
-    if (value >= max)
-        return 255;
-
-    return (uint8_t)(((value - min) / (max - min)) * 255.0f);
-}
-
-/**
- * @brief Record one set of debug data.
- *
- * Data is buffered and transmitted as binary records over USB.
- *
- * Record format:
- *   uint16_t sample
- *   uint8_t  filtered_1200
- *   uint8_t  filtered_2200
- *   uint8_t  metric
- *
- * Total: 5 bytes per record.
- */
 int debug_handle_recording(
-    uint16_t sample,
-    float filtered_1200,
-    float filtered_2200,
-    float metric)
+    uint16_t sample)
 {
-    debug_buffer[debug_buffer_index].sync = SYNC_WORD;
-    debug_buffer[debug_buffer_index].sample = sample;
-    debug_buffer[debug_buffer_index].filtered_1200 =
-        amplitude_to_u8(filtered_1200);
-    debug_buffer[debug_buffer_index].filtered_2200 =
-        amplitude_to_u8(filtered_2200);
-    debug_buffer[debug_buffer_index].metric =
-        amplitude_to_u8(metric);
-
-    debug_buffer_index++;
-
-    if (debug_buffer_index >= DEBUG_BUFFER_SIZE)
-    {
-        fwrite(
-            debug_buffer,
-            sizeof(debug_record_t),
-            DEBUG_BUFFER_SIZE,
-            stdout);
-
-        fflush(stdout);
-
-        debug_buffer_index = 0;
-    }
+    // TODO: Implement recording logic here.
 
     return 0;
 }
