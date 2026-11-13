@@ -177,4 +177,12 @@ class SerialSource:
             self.errors.append(str(e))
 
         finally:
+            # Close the port so `connected` reflects reality after an
+            # unplug (stop() skips it if we got here first).
+            try:
+                self._ser.close()
+            except Exception:
+                pass
+
+            self._ser = None
             self._reader_done.set()
