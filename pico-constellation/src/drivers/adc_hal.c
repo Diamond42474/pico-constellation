@@ -144,7 +144,11 @@ int adc_hal_start(void)
     if (is_running)
         return 0;
 
-    float clkdiv = 48000000.0f / sample_rate;
+    // Per RP2040 datasheet 4.9.2.2: in free-running mode a new conversion
+    // starts every (DIV + 1) cycles of the 48 MHz ADC clock (pacing is
+    // ignored while a conversion runs; min period is 96 cycles = 500 kS/s).
+    // So sample rate = 48 MHz / (DIV + 1) -> DIV = 48 MHz / rate - 1.
+    float clkdiv = 48000000.0f / sample_rate - 1.0f;
     adc_set_clkdiv(clkdiv);
 
     adc_fifo_setup(true, true, 1, false, false);
