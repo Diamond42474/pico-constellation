@@ -50,11 +50,13 @@ to the output file.
 
 ### Launcher
 
-`record.sh` creates a local virtual environment, installs the
-requirements, and starts the recorder:
+`record.sh` (Linux/macOS) or `record.bat` (Windows) creates a local
+virtual environment, installs the requirements, and starts the recorder.
+Arguments are forwarded to `record.py`:
 
 ```bash
-./record.sh
+./record.sh --port /dev/ttyACM0 --duration 30     # Linux/macOS
+record.bat --port COM5 --duration 30              # Windows
 ```
 
 ## Output format
@@ -91,7 +93,7 @@ silently producing a gap.
 ## Files
 
 - `record.py` — recorder, frame parser, CLI
-- `record.sh` — venv launcher
+- `record.sh` / `record.bat` — venv launchers (Linux/macOS / Windows)
 - `test_recorder_protocol.py` — offline protocol test (no hardware needed)
 - `requirements.txt`
 
