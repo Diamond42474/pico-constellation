@@ -1,268 +1,261 @@
-import os
-import time
+#!/usr/bin/env python3
+"""
+Record raw ADC samples streamed from a Pico Constellation recorder.
+
+The firmware (pico-constellation/src/recorder.c) streams little-endian
+frames over USB CDC:
+
+    magic   uint16  0x5AA5
+    seq     uint16  frame sequence number (wraps at 16 bits)
+    count   uint16  number of samples in this frame
+    samples uint16[count]   raw 12-bit ADC samples
+    crc     uint16  CRC-16/CCITT-FALSE over all preceding bytes
+
+The parser resynchronizes on the magic word after any byte loss, drops
+frames that fail the CRC, and reports gaps in the sequence number.
+
+Samples are written to a .raw file as raw uint16 (little-endian) with no
+header, matching the convention used by scripts/dsp.py
+(np.fromfile(FILENAME, dtype=np.uint16)).
+
+Usage:
+    python record.py --port COM5
+    python record.py --port /dev/ttyACM0 --duration 30 --out capture.raw
+    python record.py --port COM5 --expected-rate 44100
+"""
+
+import argparse
+import array
 import struct
-import queue
+import sys
 import threading
+import time
 
-import serial
-import pyqtgraph as pg
-
-from PyQt6.QtWidgets import QApplication
-
-
-DEVICE = "/dev/ttyACM0"
-BAUD_RATE = 115200
-
-ADC_SAMPLE_RATE = 48000
-
-SYNC_WORD = 0xABCD
-SYNC_BYTES = struct.pack("<H", SYNC_WORD)
-
-RECORD_SIZE = 7
-MAX_DATAPOINTS = 1000
-
-GRAPH_SKIP = 100  # Number of records to skip between graph updates
+MAGIC = 0x5AA5
+HEADER_SIZE = 6  # magic + seq + count
+FOOTER_SIZE = 2  # crc
+MAX_FRAME_SAMPLES = 4096  # Sanity bound for count; larger means desync
 
 
-# Global queue containing:
-# (sample, filtered_1200, filtered_2200, metric)
-record_queue = queue.Queue()
-graph_queue = queue.Queue()
+def crc16_ccitt(data: bytes) -> int:
+    """CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF). Must match the firmware."""
+    crc = 0xFFFF
+    for byte in data:
+        crc ^= byte << 8
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x1021) & 0xFFFF if crc & 0x8000 else (crc << 1) & 0xFFFF
+    return crc
 
 
-def wait_for_device():
-    """Block until the serial device exists."""
-
-    while not os.path.exists(DEVICE):
-        time.sleep(0.1)
-
-    return DEVICE
-
-
-def connect_serial():
-    """Wait for and open the serial device."""
-
-    while True:
-        wait_for_device()
-
-        try:
-            ser = serial.Serial(
-                DEVICE,
-                BAUD_RATE,
-                timeout=1
-            )
-
-            print(f"Connected to {DEVICE}")
-            return ser
-
-        except (serial.SerialException, OSError) as e:
-            print(f"Failed to connect: {e}")
-            time.sleep(0.5)
-
-
-def read_record(ser, buffer):
+class FrameParser:
     """
-    Read and synchronize to the next complete record.
+    Incremental frame parser. Feed it raw bytes (any chunk size); it
+    yields (seq, samples) tuples for every good frame.
 
-    Record format:
-
-        uint16 sync
-        uint16 sample
-        uint8  filtered_1200
-        uint8  filtered_2200
-        uint8  metric
-
-    Total: 7 bytes
-
-    The function searches for SYNC_WORD in the byte stream and
-    discards any bytes before it.
+    stats: dict with keys
+        frames_ok      frames with a valid CRC
+        frames_bad_crc frames whose CRC failed
+        resyncs        times we had to hunt for the magic word
+        bytes_discarded bytes thrown away while resynchronizing
+        seq_gaps       number of missing frames (sequence number gaps)
     """
 
-    while True:
+    def __init__(self):
+        self._buf = bytearray()
+        self._expect_seq = None
+        self.stats = {
+            "frames_ok": 0,
+            "frames_bad_crc": 0,
+            "resyncs": 0,
+            "bytes_discarded": 0,
+            "seq_gaps": 0,
+        }
 
-        # Read more data if we don't have enough to search for
-        # the sync word.
-        if len(buffer) < 2:
-            data = ser.read(64)
-
-            if not data:
-                raise serial.SerialException(
-                    "Serial device disconnected"
-                )
-
-            buffer.extend(data)
-
-        # Search for the sync word.
-        sync_index = buffer.find(SYNC_BYTES)
-
-        if sync_index == -1:
-            # No sync word found.
-
-            # Keep the final byte in case it is the first half
-            # of the sync word.
-            if len(buffer) > 1:
-                del buffer[:-1]
-
-            continue
-
-        # Discard anything before the sync word.
-        if sync_index > 0:
-            del buffer[:sync_index]
-
-        # We now know buffer[0:2] is the sync word.
-        # Wait until the complete record is available.
-        while len(buffer) < RECORD_SIZE:
-            data = ser.read(RECORD_SIZE - len(buffer))
-
-            if not data:
-                raise serial.SerialException(
-                    "Serial device disconnected"
-                )
-
-            buffer.extend(data)
-
-        # Extract the complete record.
-        record = bytes(buffer[:RECORD_SIZE])
-        del buffer[:RECORD_SIZE]
-
-        sync, sample, filtered_1200, filtered_2200, metric = (
-            struct.unpack("<HHBBB", record)
-        )
-
-        # This should always be true because we found SYNC_BYTES,
-        # but verify it anyway.
-        if sync != SYNC_WORD:
-            continue
-
-        return sample, filtered_1200, filtered_2200, metric
-
-
-def serial_reader():
-    """
-    Continuously read records from the serial device.
-
-    If the device disconnects, close the connection and
-    return to waiting for it to reconnect.
-    """
-
-    while True:
-        ser = connect_serial()
-
-        # Persistent byte buffer used for synchronization.
-        buffer = bytearray()
-
-        skip_index = 0
-
-        try:
-            while True:
-                record = read_record(ser, buffer)
-
-                # Uncomment if you want every record in the queue.
-                # record_queue.put(record)
-
-                if skip_index == GRAPH_SKIP:
-                    graph_queue.put(record)
-                    skip_index = 0
-
-                skip_index += 1
-
-        except (serial.SerialException, OSError) as e:
-            print(f"Disconnected: {e}")
-
-        finally:
-            try:
-                ser.close()
-            except Exception:
-                pass
-
-            print("Waiting for device to reconnect...")
-
-
-def graph_data():
-    """Display the four record fields in real time."""
-
-    app = pg.mkQApp("Signal Data")
-
-    win = pg.GraphicsLayoutWidget()
-
-    win.setWindowTitle("Signal Data")
-    win.resize(1200, 800)
-
-    plots = []
-    data = [[], [], [], []]
-
-    names = [
-        "Sample",
-        "Filtered 1200",
-        "Filtered 2200",
-        "Metric"
-    ]
-
-    for i, name in enumerate(names):
-        plot = win.addPlot(
-            row=i,
-            col=0,
-            title=name
-        )
-
-        plot.showGrid(x=True, y=True)
-
-        curve = plot.plot()
-
-        plots.append(curve)
-
-    def update():
-        """Consume all currently available records."""
+    def feed(self, data: bytes):
+        """Feed raw bytes; returns a list of (seq, samples) good frames."""
+        self._buf.extend(data)
+        frames = []
+        buf = self._buf
+        magic = struct.pack("<H", MAGIC)
 
         while True:
-            try:
-                record = graph_queue.get_nowait()
-
-            except queue.Empty:
+            idx = buf.find(magic)
+            if idx < 0:
+                # Keep the last byte in case it is the first magic byte
+                del buf[: max(0, len(buf) - 1)]
+                if len(buf) > 2048:
+                    # No magic anywhere in a big pile of data: discard all but last byte
+                    del buf[:-1]
+                    self.stats["bytes_discarded"] += len(data)
                 break
 
-            sample, filtered_1200, filtered_2200, metric = record
+            if idx > 0:
+                self.stats["resyncs"] += 1
+                self.stats["bytes_discarded"] += idx
+                del buf[:idx]
 
-            values = [
-                sample,
-                filtered_1200,
-                filtered_2200,
-                metric
-            ]
+            if len(buf) < HEADER_SIZE:
+                break  # Wait for the rest of the header
 
-            for i, value in enumerate(values):
-                data[i].append(value)
+            seq, count = struct.unpack_from("<HH", buf, 2)
+            if count == 0 or count > MAX_FRAME_SAMPLES:
+                # Header is garbage: step one byte past this magic and rescan
+                del buf[0]
+                self.stats["resyncs"] += 1
+                self.stats["bytes_discarded"] += 1
+                continue
 
-                if len(data[i]) > MAX_DATAPOINTS:
-                    data[i] = data[i][-MAX_DATAPOINTS:]
+            frame_len = HEADER_SIZE + count * 2 + FOOTER_SIZE
+            if len(buf) < frame_len:
+                break  # Wait for the rest of the frame
 
-                plots[i].setData(data[i])
+            frame = bytes(buf[:frame_len])
+            del buf[:frame_len]
 
-    # Parent the timer to the window so it stays alive.
-    timer = pg.QtCore.QTimer(win)
+            payload, crc_rx = frame[:-FOOTER_SIZE], struct.unpack_from("<H", frame, -FOOTER_SIZE)[0]
+            if crc16_ccitt(payload) != crc_rx:
+                self.stats["frames_bad_crc"] += 1
+                continue  # Corrupted: rescan from the next byte (may resync mid-frame)
 
-    timer.timeout.connect(update)
+            self.stats["frames_ok"] += 1
+            if self._expect_seq is not None:
+                expected = self._expect_seq
+                if seq != expected:
+                    self.stats["seq_gaps"] += (seq - expected) & 0xFFFF
+            self._expect_seq = (seq + 1) & 0xFFFF
 
-    timer.start(10)
+            samples = array.array("H")
+            samples.frombytes(payload[HEADER_SIZE:])
+            frames.append((seq, samples))
 
-    win.show()
+        return frames
 
-    print("Graph started.")
 
-    app.exec()
+def open_serial(port: str):
+    """Open the serial port, waiting for the device to appear."""
+    import serial  # Lazy import so the parser is testable without pyserial
+
+    print(f"Opening {port} ...")
+    while True:
+        try:
+            ser = serial.Serial(port, 115200, timeout=1.0)
+            print(f"Connected to {port}")
+            return ser
+        except (serial.SerialException, OSError) as e:
+            print(f"Could not open {port}: {e}")
+            print("Is the Pico plugged in? (retrying every 2 s, Ctrl+C to quit)")
+            time.sleep(2.0)
 
 
 def main():
-    reader_thread = threading.Thread(
-        target=serial_reader,
-        daemon=True
+    ap = argparse.ArgumentParser(description="Record ADC samples from a Pico Constellation recorder.")
+    ap.add_argument("--port", required=True, help="Serial port of the Pico (e.g. COM5 or /dev/ttyACM0)")
+    ap.add_argument("--out", default="capture.raw", help="Output .raw file (uint16 little-endian, no header). Default: capture.raw")
+    ap.add_argument("--duration", type=float, default=None, help="Record for N seconds, then stop (default: until Ctrl+C)")
+    ap.add_argument("--expected-rate", type=float, default=44100.0, help="Nominal sample rate in Hz, for reference (default: 44100)")
+    args = ap.parse_args()
+
+    try:
+        ser = open_serial(args.port)
+    except KeyboardInterrupt:
+        print("\nAborted before connecting.")
+        return 1
+
+    parser = FrameParser()
+    stop = threading.Event()
+    errors = []
+
+    # Sample sink shared with the reader thread
+    sink = array.array("H")
+    sink_lock = threading.Lock()
+    samples_written = [0]
+    total_samples = [0]
+
+    out_file = open(args.out, "wb")
+
+    def reader():
+        empty_streak = 0
+        try:
+            while not stop.is_set():
+                data = ser.read(4096)
+                if not data:
+                    # pyserial returns b'' both on timeout and on a dead
+                    # device; only treat a sustained gap as a disconnect.
+                    empty_streak += 1
+                    if empty_streak >= 5:  # ~5 s with no data at all
+                        errors.append("No data for ~5 s (device disconnected?)")
+                        break
+                    continue
+                empty_streak = 0
+                for _seq, samples in parser.feed(data):
+                    with sink_lock:
+                        sink.extend(samples)
+                    total_samples[0] += len(samples)
+        except Exception as e:
+            errors.append(str(e))
+            stop.set()
+
+    t = threading.Thread(target=reader, daemon=True)
+    t.start()
+    start = time.monotonic()
+
+    print(f"Recording to {args.out} (expected ~{args.expected_rate:.0f} Hz). Ctrl+C to stop.")
+    try:
+        last_report = time.monotonic()
+        while not stop.is_set():
+            if args.duration is not None and (time.monotonic() - start) >= args.duration:
+                break
+
+            # Flush buffered samples to disk
+            with sink_lock:
+                if len(sink) >= 65536:
+                    out_file.write(sink.tobytes())
+                    samples_written[0] += len(sink)
+                    del sink[:]
+
+            # Report stats once per second
+            now = time.monotonic()
+            if now - last_report >= 1.0:
+                elapsed = now - start
+                rate = (total_samples[0] + samples_written[0]) / elapsed if elapsed > 0 else 0.0
+                s = parser.stats
+                print(
+                    f"  {rate:8.0f} Hz   "
+                    f"samples {total_samples[0] + samples_written[0]:>10}   "
+                    f"frames ok {s['frames_ok']:>6}  bad {s['frames_bad_crc']:>4}  "
+                    f"gaps {s['seq_gaps']:>4}"
+                )
+                last_report = now
+
+            time.sleep(0.05)
+    except KeyboardInterrupt:
+        print("\nStopping...")
+    finally:
+        stop.set()
+        t.join(timeout=3.0)
+        with sink_lock:
+            if sink:
+                out_file.write(sink.tobytes())
+                samples_written[0] += len(sink)
+        out_file.close()
+        ser.close()
+
+    total = total_samples[0] + samples_written[0]
+    elapsed = time.monotonic() - start
+    s = parser.stats
+    print(
+        f"\nDone. {total} samples in {elapsed:.1f} s "
+        f"({total / elapsed:.0f} Hz measured, {args.expected_rate:.0f} Hz expected)."
     )
+    print(f"Frames: {s['frames_ok']} ok, {s['frames_bad_crc']} bad CRC, {s['seq_gaps']} missing (seq gaps).")
+    if s["bytes_discarded"]:
+        print(f"Resynced {s['resyncs']} time(s), discarded {s['bytes_discarded']} stray byte(s).")
+    if errors:
+        print(f"Note: {errors[-1]}")
+    print(f"Saved {total * 2} bytes to {args.out}")
 
-    reader_thread.start()
-
-    # Qt must run on the main thread.
-    graph_data()
+    return 0 if not errors else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

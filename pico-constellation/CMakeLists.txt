@@ -66,7 +66,15 @@ target_link_libraries(${PROJECT_NAME}
 # add_definitions(-DFIXED_POINT=16 -Dkiss_fft_scalar=uint16_t)
 add_compile_definitions(${PROJECT_NAME} 
 PRIVATE 
+    pconfig_DEBUG_RECORDING_ENABLED=1   # Stream raw ADC samples to the host over USB CDC
     #LWIP_PROVIDE_ERRNO=1
+)
+
+# The FSK decoder in the library calls debug_handle_recording() per sample
+# when this flag is set, so it must be defined for the library target too.
+target_compile_definitions(peregrine-constellation-impl
+    PRIVATE
+        pconfig_DEBUG_RECORDING_ENABLED=1
 )
 
 target_compile_options(${PROJECT_NAME} PRIVATE -Ofast)
