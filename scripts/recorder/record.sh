@@ -13,7 +13,12 @@ fi
 source "$VENV_DIR/bin/activate"
 
 echo "Installing requirements..."
-python3 -m pip install -r requirements.txt
+"$VENV_DIR/bin/python" -m pip install -r requirements.txt
+
+echo ""
+echo "Available serial ports:"
+"$VENV_DIR/bin/python" -c "import serial.tools.list_ports as lp; ports = lp.comports(); print('\n'.join('  ' + p.device + '  |  ' + p.description for p in ports) if ports else '  (none found)')"
+echo ""
 
 echo "Starting recorder..."
 python3 record.py "$@"
