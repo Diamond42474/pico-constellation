@@ -62,6 +62,28 @@ launcher prints an install hint and exits. Arguments are forwarded to
 record.bat --port COM5 --duration 30              # Windows
 ```
 
+### GUI
+
+`record_gui.py` is a tkinter desktop app for recording and viewing the
+stream live:
+
+```bash
+python record_gui.py
+```
+
+Pick the Pico's port from the dropdown, press **Start Recording** to
+stream, and watch the waveform update in real time (last 5 seconds,
+min/max decimated). Press **Stop Recording** to save the capture as a
+timestamped file in the git-ignored `recordings/` folder:
+
+```
+recordings/capture_2026-11-13_15-07-32.raw
+```
+
+The status bar shows live rate, sample count, frames, missing samples,
+firmware-reported drops, and CRC errors. If the device is unplugged
+mid-recording, the capture is saved automatically.
+
 ## Output format
 
 Raw little-endian unsigned 16-bit samples, no header, at 44.1 kHz.
@@ -96,8 +118,11 @@ silently producing a gap.
 ## Files
 
 - `record.py` — recorder, frame parser, CLI
+- `record_gui.py` — tkinter GUI: live waveform + one-click recording
+- `recorder_core/` — shared library (protocol, serial source, session, plotting)
 - `record.sh` / `record.bat` — venv launchers (Linux / macOS / Windows)
 - `test_recorder_protocol.py` — offline protocol test (no hardware needed)
+- `test_recording_session.py` — offline recording-file test (no hardware needed)
 - `requirements.txt`
 
 ## Testing

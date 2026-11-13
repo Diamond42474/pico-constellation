@@ -4,7 +4,7 @@ Protocol test for the recorder (14-byte header) protocol.
 
 Transcribes pico-constellation/src/recorder.c (ring of {sample, index},
 drop-oldest, full-frame-only flush) and feeds its byte stream through the
-real FrameParser in scripts/record.py.
+real FrameParser in recorder_core.protocol.
 
 Firmware flow (verified against fsk_decoder.c + main.c): the FSK decoder
 state machine goes IDLE->DECODING as soon as the input buffer is non-empty
@@ -21,19 +21,15 @@ Test cases:
   4. Frame loss (whole frames dropped on the wire): seq-gap detection.
   5. Byte corruption mid-stream: resync on next magic, continuity after.
 """
-import importlib.util
 import os
 import struct
 import sys
 
-# record.py lives next to this test.
+# recorder_core package lives next to this test.
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 
-# --- load the real parser from record.py -----------------------------------
-spec = importlib.util.spec_from_file_location(
-    "record", os.path.join(HERE, "record.py"))
-record = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(record)
+from recorder_core.protocol import FrameParser, crc16_ccitt
 
 
 # --- transcribed firmware --------------------------------------------------
@@ -70,7 +66,7 @@ class Firmware:
             self.FRAME_SAMPLES, dropped)
         self.frame_seq = (self.frame_seq + 1) & 0xFFFF
         payload = header + struct.pack(f"<{len(samples)}H", *samples)
-        crc = record.crc16_ccitt(payload)
+        crc = crc16_ccitt(payload)
         self.wire += payload + struct.pack("<H", crc)
 
     def flush(self):
@@ -105,7 +101,7 @@ def summary(label, parser, total):
 
 def main():
     # --- resync source check: replay test 1 with an instrumented parser ---
-    fw, parser = Firmware(2048), record.FrameParser()
+    fw, parser = Firmware(2048), FrameParser()
     ready = b"PICO-CONSTELLATION RECORDER READY\n"
     parser.feed(ready)
     r_after_ready = parser.stats["resyncs"]
@@ -119,7 +115,7 @@ def main():
     total = total_iters * push
 
     # 1. normal iterations
-    fw, parser = Firmware(2048), record.FrameParser()
+    fw, parser = Firmware(2048), FrameParser()
     parser.feed(b"PICO-CONSTELLATION RECORDER READY\n")
     for _ in range(total_iters):
         fw.iteration(push)
@@ -135,7 +131,7 @@ def main():
     #    cycle. Loss must be REPORTED consistently (index gap == dropped
     #    counter), never silent. (Steady state on the real device is the
     #    1024-sample cycle of test 1 — verified by the live capture.)
-    fw, parser = Firmware(2048), record.FrameParser()
+    fw, parser = Firmware(2048), FrameParser()
     for _ in range(total_iters):
         fw.iteration(3072)
         feed(fw, parser)
@@ -149,7 +145,7 @@ def main():
 
     # 3. USB stall: 50 normal iterations, then flush blocked for 20 iterations
     #    (ring fills, oldest samples dropped), then recovery.
-    fw, parser = Firmware(2048), record.FrameParser()
+    fw, parser = Firmware(2048), FrameParser()
     for _ in range(50):
         fw.iteration(1024)
         feed(fw, parser)
@@ -169,7 +165,7 @@ def main():
 
     # 4. frame loss (whole frames dropped on the wire)
     fw = Firmware(2048)
-    parser = record.FrameParser()
+    parser = FrameParser()
     for _ in range(10):
         fw.iteration(1024)
     wire = bytes(fw.wire)          # copy before clearing!
@@ -195,7 +191,7 @@ def main():
 
     # 5. byte corruption: overwrite 100 bytes mid frame-2 with garbage
     fw = Firmware(2048)
-    parser = record.FrameParser()
+    parser = FrameParser()
     for _ in range(10):
         fw.iteration(1024)
     blob = bytearray(fw.wire)      # copy

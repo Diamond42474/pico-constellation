@@ -56,3 +56,5 @@ docs/
 .vscode/
 .idea/
 *venv/
+scripts/recorder/recordings/
+__pycache__/
