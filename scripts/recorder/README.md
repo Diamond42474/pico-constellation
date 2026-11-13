@@ -50,9 +50,12 @@ to the output file.
 
 ### Launcher
 
-`record.sh` (Linux/macOS) or `record.bat` (Windows) creates a local
-virtual environment, installs the requirements, and starts the recorder.
-Arguments are forwarded to `record.py`:
+`record.sh` (Linux/macOS, also works in git-bash on Windows) or
+`record.bat` (Windows) creates a local
+virtual environment, installs the requirements, lists available serial
+ports, and starts the recorder. If Python 3 is not installed, the
+launcher prints an install hint and exits. Arguments are forwarded to
+`record.py`:
 
 ```bash
 ./record.sh --port /dev/ttyACM0 --duration 30     # Linux/macOS
@@ -93,7 +96,7 @@ silently producing a gap.
 ## Files
 
 - `record.py` — recorder, frame parser, CLI
-- `record.sh` / `record.bat` — venv launchers (Linux/macOS / Windows)
+- `record.sh` / `record.bat` — venv launchers (Linux / macOS / Windows)
 - `test_recorder_protocol.py` — offline protocol test (no hardware needed)
 - `requirements.txt`
 
