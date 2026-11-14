@@ -62,6 +62,32 @@ launcher prints an install hint and exits. Arguments are forwarded to
 record.bat --port COM5 --duration 30              # Windows
 ```
 
+### GUI
+
+`record_gui.py` is a tkinter desktop app that shows the ADC stream live
+and records it on demand:
+
+```bash
+python record_gui.py        # or ./gui.sh / gui.bat
+```
+
+The stream starts as soon as the selected port connects (pick from the
+dropdown, or press Refresh; it auto-reconnects if the device is
+re-plugged) and the waveform updates continuously — last 5 seconds,
+min/max decimated. **Start Recording** / **Stop Recording** only
+controls whether samples are written to disk; stopping does not stop
+the stream. Captures are saved as timestamped files in the git-ignored
+`recordings/` folder:
+
+```
+recordings/capture_2026-11-13_15-07-32.raw
+```
+
+The status bar shows the live state (Streaming/Recording), rate, sample
+count, frames, missing samples, firmware-reported drops, and CRC
+errors. If the device is unplugged mid-recording, the capture is saved
+automatically.
+
 ## Output format
 
 Raw little-endian unsigned 16-bit samples, no header, at 44.1 kHz.
@@ -96,8 +122,12 @@ silently producing a gap.
 ## Files
 
 - `record.py` — recorder, frame parser, CLI
-- `record.sh` / `record.bat` — venv launchers (Linux / macOS / Windows)
+- `record_gui.py` — tkinter GUI: live waveform + on-demand recording
+- `recorder_core/` — shared library (protocol, serial source, session, plotting)
+- `record.sh` / `record.bat` — CLI venv launchers (Linux / macOS / Windows)
+- `gui.sh` / `gui.bat` — GUI venv launchers (Linux / macOS / Windows)
 - `test_recorder_protocol.py` — offline protocol test (no hardware needed)
+- `test_recording_session.py` — offline recording-file test (no hardware needed)
 - `requirements.txt`
 
 ## Testing
